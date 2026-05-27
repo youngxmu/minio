@@ -401,3 +401,197 @@ Filer metadata store 异常
 3. `mc mirror --remove` 必须谨慎，只适合最终停写后的严格同步窗口。
 4. 真实生产数据仍需扫描 `a/b` 与 `a/b/c` 路径冲突。
 5. 生产 SeaweedFS 需要高可用 metadata store 和多副本策略。
+
+## 14. 用户目录合并后的大目录风险
+
+当前 MinIO 数据按以下方式分组：
+
+```text
+bucket/{userid}/<video-object>
+```
+
+如果有 10 个 MinIO，每个 MinIO 中同一个用户上传 1 万个视频，那么合并到同一个 SeaweedFS bucket 后会变成：
+
+```text
+bucket/{userid}/ 下约 10 万个对象
+```
+
+### 14.1 SeaweedFS 是否受操作系统目录文件数限制
+
+SeaweedFS 的 Volume Server 不会把每个 object 按真实 Linux 文件路径保存为：
+
+```text
+/data/bucket/{userid}/video.mp4
+```
+
+对象数据会进入 SeaweedFS volume 文件，目录和文件名由 Filer metadata store 管理。因此，合并后 `bucket/{userid}` 下有 10 万个对象，不会直接触发 Linux 单目录文件数限制。
+
+### 14.2 仍然存在的风险
+
+风险会转移到 Filer/list 层：
+
+```text
+一次性列出 bucket/{userid}/ 下全部对象
+Filer HTTP 目录列表
+S3 ListObjectsV2 大 prefix 分页
+FUSE 挂载后对该目录执行 ls
+业务后台全量扫描用户目录
+```
+
+这些操作可能出现慢查询、高内存占用、接口超时或分页过深问题。
+
+生产约束：
+
+```text
+业务读取单个文件必须使用完整 object key GET。
+业务不得依赖一次性列出 bucket/{userid}/ 下全部对象。
+后台任务必须分页扫描，不能全目录一次性拉取。
+如果业务需要展示用户文件列表，应优先走业务数据库分页，而不是直接 list 对象存储目录。
+```
+
+### 14.3 新写入路径建议
+
+为了降低长期大 prefix 风险，新写入建议逐步改为分片路径：
+
+```text
+bucket/{userid}/{yyyy}/{mm}/{video_id}
+bucket/{userid}/{hash_prefix}/{video_id}
+bucket/{userid}/{video_id_prefix}/{video_id}
+```
+
+历史数据可以保持原路径，只换 host；新数据逐步通过数据库记录真实 object key。
+
+## 15. 大数据量内网迁移效率测试计划
+
+### 15.1 当前环境变化
+
+4070 的数据盘已被拔掉，不再适合作为 SeaweedFS 测试目标机。
+
+已检查候选机器：
+
+| 服务器 | 结果 |
+| --- | --- |
+| A3802 `172.16.100.234` | 当前 SSH 22 端口拒绝连接，暂不可用 |
+| B580 `172.16.100.239` | 仅根分区约 466G，可用约 406G；无 1T+ 数据盘，且已有 RustFS 占用 9000 |
+| dba380 `172.16.101.27` | 仅约 98G 根分区，无 1T+ 数据盘 |
+| 890 `172.16.101.33` | 仅约 98G 根分区，无 1T+ 数据盘 |
+| A770 `172.16.100.56` | 之前检查仅约 466G 根分区，无 1T+ 数据盘 |
+| A380 `172.16.100.132` | 有 4 块约 15T 数据盘，但它是本轮源端 |
+
+当前结论：
+
+```text
+已连通的非源端候选机器中，暂未找到独立 1T+ 数据盘的 SeaweedFS 目标机。
+```
+
+推荐优先级：
+
+```text
+1. 恢复 A3802 SSH，如果它有类似 A380 的数据盘，优先作为 SeaweedFS 目标机。
+2. 恢复或重新挂载 4070 的 1T+ 数据盘后继续作为目标机。
+3. 提供新的 1T+ 数据盘服务器作为目标机。
+4. 不建议用 B580 承载 400-600G 测速，因为可用空间不足且缺少余量。
+5. 不建议用 A380 同机做目标测速，因为无法代表内网跨机迁移效率。
+```
+
+### 15.2 A380 源端现状
+
+A380 有 4 块约 15T XFS 数据盘：
+
+```text
+/data/data1
+/data/data2
+/data/data3
+/data/data4
+```
+
+挂载层显示 `/data/data1` 已用约 458G，符合 400-600G 测试数据量级。
+
+A380 上存在历史 MinIO 容器：
+
+```text
+minio_local
+```
+
+状态：
+
+```text
+Exited
+```
+
+它挂载：
+
+```text
+/data/data1 -> /data-1
+/data/data2 -> /data-2
+/data/data3 -> /data-3
+/data/data4 -> /data-4
+```
+
+注意：该历史 MinIO 曾尝试向 `172.16.100.217:9000` 做 cold tier transition。启动前必须先确认 lifecycle / tier 配置，避免测试过程中继续向已不适合作为目标的 4070 写入或报错。
+
+### 15.3 单台 MinIO 大数据迁移测速流程
+
+目标：
+
+```text
+只测试 A380 单台 MinIO -> 新 SeaweedFS 目标机。
+验证 400-600G 数据在内网环境下的迁移效率、稳定性和校验成本。
+```
+
+推荐数据路径：
+
+```text
+A380 minio_local -> mc mirror -> 新 SeaweedFS S3 Gateway
+```
+
+迁移执行机建议放在 SeaweedFS 目标机上，使数据路径为：
+
+```text
+A380 -> 目标机
+```
+
+这样测到的是内网跨机迁移吞吐，而不是本机回环或外网跳板速度。
+
+步骤：
+
+```text
+1. 选定 1T+ 目标机。
+2. 在目标机数据盘上部署单机 SeaweedFS 测试环境。
+3. 确认 A380 minio_local 启动方式和 lifecycle/tier 配置。
+4. 只选择一个真实大 bucket 或一个用户 prefix 做迁移。
+5. 迁移前生成 source manifest。
+6. 执行 mc mirror，记录开始时间、结束时间、总字节、平均吞吐。
+7. 迁移后生成 target manifest。
+8. 做 key + size 全量 diff。
+9. 抽样 sha256 校验大文件、热点文件、特殊路径。
+10. 记录源端和目标端 CPU、网络、磁盘 IO。
+```
+
+测速指标：
+
+```text
+源 bucket / prefix
+对象数
+总大小
+最大对象
+迁移耗时
+平均吞吐
+峰值网络
+源端磁盘读
+目标端磁盘写
+mc mirror 重试次数
+失败对象数
+manifest diff 数量
+checksum 失败数
+```
+
+通过标准：
+
+```text
+mc mirror 退出码为 0
+manifest diff 为空
+checksum 样本无失败
+迁移期间源 MinIO 和目标 SeaweedFS 无持续错误日志
+吞吐结果可复现，至少跑两轮或按 prefix 跑两个批次
+```
