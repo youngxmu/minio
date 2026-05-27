@@ -328,3 +328,130 @@ Filer HTTP：通过
 4. 为生产 SeaweedFS 设计多节点拓扑、volume 上限、metadata store 和备份方案。
 ```
 
+## 8. Host-only 访问路径补充测试
+
+用户确认生产目标倾向于“只换 host，不改 bucket 和 object key 相对路径”。因此补做一轮同名 bucket 合并迁移测试。
+
+### 8.1 测试目标
+
+验证以下模式是否可行：
+
+```text
+old1: http://OLD1_HOST/BUCKET/<object-key>
+new:  http://SEAWEEDFS_HOST/BUCKET/<object-key>
+
+old2: http://OLD2_HOST/BUCKET/<object-key>
+new:  http://SEAWEEDFS_HOST/BUCKET/<object-key>
+```
+
+测试 bucket：
+
+```text
+host-only-demo
+```
+
+测试对象：
+
+```text
+old1/host-only-demo/from-old1/sample.txt
+old2/host-only-demo/from-old2/sample.txt
+```
+
+### 8.2 风险确认
+
+同名 bucket 合并迁移前必须做跨源重复 key 扫描：
+
+```text
+duplicate_keys=0
+```
+
+本次测试的 old1 和 old2 key 没有冲突，因此允许合并迁移到：
+
+```text
+sw/host-only-demo
+```
+
+如果生产中出现：
+
+```text
+old1/BUCKET/a.jpg
+old2/BUCKET/a.jpg
+```
+
+且两个对象内容不同，则不能直接合并到：
+
+```text
+sw/BUCKET/a.jpg
+```
+
+必须先做 size/checksum 对比并制定覆盖或改名策略。
+
+### 8.3 迁移结果
+
+执行：
+
+```bash
+mc mirror --overwrite --retry --summary old1/host-only-demo sw/host-only-demo
+mc mirror --overwrite --retry --summary old2/host-only-demo sw/host-only-demo
+```
+
+SeaweedFS 目标清单：
+
+```text
+from-old1/sample.txt  33
+from-old2/sample.txt  33
+```
+
+### 8.4 匿名 HTTP 访问
+
+为了让浏览器或 curl 直接访问测试文件，本轮对测试 bucket 设置了匿名下载能力。
+
+MinIO：
+
+```text
+old1 anonymous=download
+old2 anonymous=download
+```
+
+SeaweedFS：
+
+```text
+S3 Gateway 增加 anonymous Read/List
+sw policy=download
+```
+
+### 8.5 四个对照 URL
+
+old1：
+
+```text
+http://172.16.100.132:10100/host-only-demo/from-old1/sample.txt
+http://172.16.100.217:8333/host-only-demo/from-old1/sample.txt
+```
+
+old2：
+
+```text
+http://172.16.100.56:9100/host-only-demo/from-old2/sample.txt
+http://172.16.100.217:8333/host-only-demo/from-old2/sample.txt
+```
+
+### 8.6 访问验证
+
+四个 URL 均已通过 `curl -fsS` 验证。
+
+返回内容：
+
+```text
+host-only old1 sample 2026-05-27
+host-only old1 sample 2026-05-27
+host-only old2 sample 2026-05-27
+host-only old2 sample 2026-05-27
+```
+
+结论：
+
+```text
+只换 host、不改 bucket 和 object key 的迁移模式可行。
+前提是同名 bucket 合并前完成跨源重复 key 检查。
+```

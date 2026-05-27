@@ -179,6 +179,66 @@ mc mirror \
 
 生产建议按 bucket、prefix 或用户分批执行。大规模迁移时先从低风险、冷数据开始。
 
+### 6.1 只换 host、不改相对路径的合并迁移
+
+如果最终目标是：
+
+```text
+old1: http://OLD1_HOST/BUCKET/<object-key>
+new:  http://SEAWEEDFS_HOST/BUCKET/<object-key>
+
+old2: http://OLD2_HOST/BUCKET/<object-key>
+new:  http://SEAWEEDFS_HOST/BUCKET/<object-key>
+```
+
+这表示 old1 和 old2 的同名 bucket 会合并到 SeaweedFS 的同一个 bucket。该模式能最大限度降低业务 URL 改造成本，但有一个硬风险：
+
+```text
+old1/BUCKET/a.jpg
+old2/BUCKET/a.jpg
+```
+
+如果两个对象内容不同，迁移到：
+
+```text
+sw/BUCKET/a.jpg
+```
+
+只能保留一个对象，另一个会被覆盖，除非业务提前定义冲突处理策略。
+
+因此，执行同 bucket 合并迁移前必须先做跨源重复 key 扫描：
+
+```bash
+cut -f1 old1.BUCKET.manifest | LC_ALL=C sort > old1.BUCKET.keys
+cut -f1 old2.BUCKET.manifest | LC_ALL=C sort > old2.BUCKET.keys
+
+comm -12 old1.BUCKET.keys old2.BUCKET.keys > BUCKET.duplicate.keys
+```
+
+判断标准：
+
+```text
+BUCKET.duplicate.keys 为空：可以合并迁移到同一个 SeaweedFS bucket。
+BUCKET.duplicate.keys 非空：必须对重复 key 做 size 和 checksum 比对。
+```
+
+重复 key 处置：
+
+| 情况 | 处理方式 |
+| --- | --- |
+| size 一致且 checksum 一致 | 可视为同一对象，允许合并 |
+| size 不一致 | 不允许直接合并 |
+| checksum 不一致 | 不允许直接合并 |
+| 业务确认 old1 或 old2 优先 | 记录覆盖规则并保留被覆盖源只读 fallback |
+| 业务不能接受覆盖 | 改用来源前缀 bucket，例如 `old1-BUCKET`、`old2-BUCKET` |
+
+生产执行时，只有在重复 key 已清零或有明确处置表后，才允许执行：
+
+```bash
+mc mirror --overwrite --retry --summary old1/BUCKET sw/BUCKET
+mc mirror --overwrite --retry --summary old2/BUCKET sw/BUCKET
+```
+
 ## 7. 对账校验
 
 生成目标清单：
@@ -341,4 +401,3 @@ Filer metadata store 异常
 3. `mc mirror --remove` 必须谨慎，只适合最终停写后的严格同步窗口。
 4. 真实生产数据仍需扫描 `a/b` 与 `a/b/c` 路径冲突。
 5. 生产 SeaweedFS 需要高可用 metadata store 和多副本策略。
-
