@@ -530,6 +530,73 @@ Exited
 
 注意：该历史 MinIO 曾尝试向 `172.16.100.217:9000` 做 cold tier transition。启动前必须先确认 lifecycle / tier 配置，避免测试过程中继续向已不适合作为目标的 4070 写入或报错。
 
+### 15.2.1 A380 原 MinIO 恢复记录（2026-05-29）
+
+现象：
+
+```text
+Docker 容器 minio_local 监听 9000/9090，但健康接口返回 X-Minio-Server-Status: offline。
+日志报错：Unable to initialize backend: Storage resources are insufficient for the read operation .minio.sys/pool.bin
+```
+
+恢复前备份：
+
+```text
+/data/minio-recovery-backups/20260529-144927
+```
+
+备份内容包括：
+
+```text
+minio_local 容器 inspect
+minio_local 日志 tail
+/etc/default/minio
+df/mount/top-level 清单
+/data/data1..4/.minio.sys 压缩包和 sha256
+```
+
+根因判断：
+
+```text
+旧 Docker 容器使用 MinIO RELEASE.2022-11-08T05-27-07Z。
+.minio.sys/pool.bin 已被新格式写入，旧镜像读取时报 Unknown xl header version 3。
+A380 主机上的 /usr/local/bin/minio 为 RELEASE.2025-09-07T16-13-09Z，可以正常读取当前元数据。
+```
+
+当前恢复方式：
+
+```text
+systemd 服务：minio-local.service
+二进制：/usr/local/bin/minio
+配置：/etc/default/minio-host-recovery
+数据：MINIO_VOLUMES="/data/data{1...4}"
+API：http://172.16.100.132:9000
+Console：http://172.16.100.132:9090
+```
+
+原 Docker 容器状态：
+
+```text
+minio_local 已停止，保留用于回溯，不再作为当前服务入口。
+minio_migration_test_old1 仍是隔离测试容器，端口 10100/10190。
+```
+
+验证结果：
+
+```text
+GET /minio/health/ready -> HTTP 200
+Console / -> HTTP 200
+S3 ListBuckets -> sucaiwang,testbucket
+S3 ListObjectsV2 sucaiwang -> 可列出对象 key
+```
+
+注意：
+
+```text
+/usr/local/bin/mc 当前会 Segmentation fault，不要用它做迁移验证。
+迁移工具需要在目标机安装可用版本的 mc，或改用 rclone/aws-cli/自研签名校验脚本。
+```
+
 ### 15.3 单台 MinIO 大数据迁移测速流程
 
 目标：
