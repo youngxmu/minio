@@ -141,14 +141,29 @@ Replay exactly the same object count, object size, and concurrency against SSD+H
 
 ## 4. Tooling Changes Needed Before Execution
 
-Current `scripts/dual_minio_s3bench.py` can generate byte streams and push by `videoId`, but it does not yet upload a real local file repeatedly. Add file-based operations before this test:
+Execution status on 2026-06-03:
+
+```text
+Implemented and verified:
+scripts/dual_minio_s3bench.py put-file
+scripts/dual_minio_s3bench.py transcode-file
+tests/test_dual_minio_s3bench_file.py
+```
+
+The first local 4070S storage-saturation run has also completed. See:
+
+```text
+real-video-io-saturation-results-2026-06-03.md
+```
+
+The original tooling gap was that `scripts/dual_minio_s3bench.py` could generate byte streams and push by `videoId`, but could not upload a real local file repeatedly. The following file-based operations have now been added:
 
 ### Task 1: Add File PUT Mode
 
 **Files:**
 - Modify: `scripts/dual_minio_s3bench.py`
 
-- [ ] **Step 1: Add a file body iterator**
+- [x] **Step 1: Add a file body iterator**
 
 Add this function near `generated_chunks`:
 
@@ -162,7 +177,7 @@ def file_chunks(path, chunk_size=MB):
             yield data
 ```
 
-- [ ] **Step 2: Add `put_file_object`**
+- [x] **Step 2: Add `put_file_object`**
 
 Add this function near `put_object`:
 
@@ -181,7 +196,7 @@ def put_file_object(endpoint, access_key, secret_key, bucket, prefix, index, fil
     )
 ```
 
-- [ ] **Step 3: Add `put-file` CLI command**
+- [x] **Step 3: Add `put-file` CLI command**
 
 Add this parser section in `build_parser()`:
 
@@ -217,7 +232,7 @@ def cmd_put_file(args):
     )
 ```
 
-- [ ] **Step 4: Verify syntax**
+- [x] **Step 4: Verify syntax**
 
 Run:
 
@@ -247,7 +262,7 @@ PUT output object to MinIO
 
 For this IO test, the output object can reuse `input.MOV` bytes. Actual ffmpeg CPU/GPU encoding is not required for the first storage saturation comparison.
 
-- [ ] **Step 1: Add `transcode-file` command**
+- [x] **Step 1: Add `transcode-file` command**
 
 Add parser:
 
@@ -296,7 +311,7 @@ def cmd_transcode_file(args):
     run_parallel("transcode-file", args.count, args.concurrency, one)
 ```
 
-- [ ] **Step 2: Verify syntax**
+- [x] **Step 2: Verify syntax**
 
 Run:
 

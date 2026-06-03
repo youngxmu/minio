@@ -118,6 +118,15 @@ def generated_chunks(size_bytes, seed, chunk_size=MB):
         remaining -= n
 
 
+def file_chunks(path, chunk_size=MB):
+    with open(path, "rb") as f:
+        while True:
+            data = f.read(chunk_size)
+            if not data:
+                break
+            yield data
+
+
 def request(endpoint, method, path, access_key, secret_key, body_iter=None, length=None):
     query = ""
     headers = auth_headers(method, endpoint, path, query, access_key, secret_key)
@@ -185,6 +194,20 @@ def put_object(endpoint, access_key, secret_key, bucket, prefix, index, size_mib
         access_key,
         secret_key,
         body_iter=generated_chunks(size, key),
+        length=size,
+    )
+
+
+def put_file_object(endpoint, access_key, secret_key, bucket, prefix, index, file_path):
+    key = object_key(prefix, index)
+    size = os.path.getsize(file_path)
+    return request(
+        endpoint,
+        "PUT",
+        s3_object_path(bucket, key),
+        access_key,
+        secret_key,
+        body_iter=file_chunks(file_path),
         length=size,
     )
 
@@ -286,6 +309,24 @@ def cmd_put(args):
     )
 
 
+def cmd_put_file(args):
+    access_key, secret_key = get_creds(args)
+    run_parallel(
+        "put-file",
+        args.count,
+        args.concurrency,
+        lambda index: put_file_object(
+            args.endpoint,
+            access_key,
+            secret_key,
+            args.bucket,
+            args.prefix,
+            index,
+            args.file,
+        ),
+    )
+
+
 def cmd_get(args):
     access_key, secret_key = get_creds(args)
     run_parallel(
@@ -322,6 +363,34 @@ def cmd_transcode(args):
         }
 
     run_parallel("transcode", args.count, args.concurrency, one)
+
+
+def cmd_transcode_file(args):
+    access_key, secret_key = get_creds(args)
+
+    def one(index):
+        src = get_object(args.src_endpoint, access_key, secret_key, args.src_bucket, args.src_prefix, index)
+        if not src["ok"]:
+            return src
+        dst = put_file_object(
+            args.dst_endpoint,
+            access_key,
+            secret_key,
+            args.dst_bucket,
+            args.dst_prefix,
+            index,
+            args.output_file,
+        )
+        return {
+            "ok": dst["ok"],
+            "status": dst["status"],
+            "seconds": src["seconds"] + dst["seconds"],
+            "sent": dst["sent"],
+            "read": src["read"],
+            "error": dst["error"],
+        }
+
+    run_parallel("transcode-file", args.count, args.concurrency, one)
 
 
 def location_for_tier(row, tier):
@@ -454,6 +523,15 @@ def build_parser():
     put.add_argument("--concurrency", type=int, default=8)
     put.set_defaults(func=cmd_put)
 
+    put_file = sub.add_parser("put-file")
+    put_file.add_argument("--endpoint", required=True)
+    put_file.add_argument("--bucket", required=True)
+    put_file.add_argument("--prefix", default="obj-")
+    put_file.add_argument("--file", required=True)
+    put_file.add_argument("--count", type=int, required=True)
+    put_file.add_argument("--concurrency", type=int, default=8)
+    put_file.set_defaults(func=cmd_put_file)
+
     get = sub.add_parser("get")
     get.add_argument("--endpoint", required=True)
     get.add_argument("--bucket", required=True)
@@ -473,6 +551,18 @@ def build_parser():
     transcode.add_argument("--output-size-mib", type=int, required=True)
     transcode.add_argument("--concurrency", type=int, default=8)
     transcode.set_defaults(func=cmd_transcode)
+
+    transcode_file = sub.add_parser("transcode-file")
+    transcode_file.add_argument("--src-endpoint", required=True)
+    transcode_file.add_argument("--src-bucket", required=True)
+    transcode_file.add_argument("--src-prefix", default="raw-")
+    transcode_file.add_argument("--dst-endpoint", required=True)
+    transcode_file.add_argument("--dst-bucket", required=True)
+    transcode_file.add_argument("--dst-prefix", default="out-")
+    transcode_file.add_argument("--output-file", required=True)
+    transcode_file.add_argument("--count", type=int, required=True)
+    transcode_file.add_argument("--concurrency", type=int, default=8)
+    transcode_file.set_defaults(func=cmd_transcode_file)
 
     push = sub.add_parser("push")
     push.add_argument("--index-db", required=True)
