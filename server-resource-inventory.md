@@ -1,6 +1,6 @@
 # MinIO Migration Server Resource Inventory
 
-> Last updated: 2026-06-03 10:05 CST
+> Last updated: 2026-06-03 11:00 CST
 > Network: company intranet, direct SSH probe.
 > Scope: migration/test servers from the local ops runbook. No passwords are recorded here.
 
@@ -21,7 +21,7 @@
 | Server | Root free | Data disk free | Large-storage suitability |
 | --- | ---: | ---: | --- |
 | A380 | ~88G | ~56T across 4 x 15T disks | Large capacity, but it is the source MinIO host. Avoid target writes. |
-| 4070S | ~74G | ~22.5T across `/data/data1..3` | Best current SeaweedFS target candidate. |
+| 4070S | ~346G | ~22.5T across `/data/data1..3` | Best current SeaweedFS target candidate. |
 | A770 | ~237G | none | Not suitable for large migration target. |
 | dba380 | ~66G | none | Not suitable for migration target. |
 | A3802 | unknown | unknown | Needs SSH repair before capacity can be trusted. |
@@ -78,7 +78,7 @@ Do not use it as the SeaweedFS target, even though it has large free capacity, b
 | CPU | AMD Ryzen 9 9950X, 16 cores / 32 threads |
 | Memory | 30Gi total, ~28Gi available |
 | GPU | NVIDIA GeForce RTX 4070 SUPER, 12G VRAM |
-| Root disk | 455G ext4, 362G used, 74G free, 84% used |
+| Root disk | 455G ext4, 90G used, 346G free, 21% used |
 | Data disks | `/data/data1` 932G, 154G used, 778G free; `/data/data2` 11T, 235G used; `/data/data3` 11T, 214G used |
 | Active services | Docker `minio_local` on `9000/9090`; SeaweedFS test stack; `gm-service-latest` on `8090` |
 | SeaweedFS ports | master `9333`, volume `8080`, filer `8888`, S3 `8333` |
@@ -98,7 +98,18 @@ Task recommendation:
 ```text
 This is the best current SeaweedFS target candidate.
 For real migration throughput tests, redeploy or move SeaweedFS volume data to /data/data2 and/or /data/data3.
-Avoid writing large migration data to root, because root is already 84% used.
+Avoid root-backed Docker volumes for large migration data even after cleanup.
+```
+
+Cleanup note:
+
+```text
+2026-06-03: removed 160G hidden rootfs data under mounted /data/data1 and /data/data2.
+The removed paths were underlying root filesystem directories hidden by mounted data disks:
+/data/data1/sucaiwang 24G
+/data/data2/sucaiwang 136G
+They matched old MinIO erasure data layout, not the current SeaweedFS test mount.
+Cleanup log on 4070S: /root/codex-cleanup-20260603-hidden-data.txt
 ```
 
 ### A770
@@ -233,6 +244,6 @@ Reason: they cannot currently be scheduled safely.
 | Risk | Impact | Suggested action |
 | --- | --- | --- |
 | A380 lifecycle transition still retries COLD | Adds background errors/load during source migration | Inspect and disable lifecycle/tier rules before benchmark runs. |
-| 4070S root is 84% used | Large Docker/log writes may fill root | Keep migration data on `/data/data2` or `/data/data3`; avoid root-backed Docker volumes. |
+| 4070S root-backed Docker volumes | Large Docker/log writes can still grow on root | Keep migration data on `/data/data2` or `/data/data3`; avoid root-backed Docker volumes. |
 | 4070S current SeaweedFS is on `/data/data1` | Only ~778G free in current deployment path | Redeploy SeaweedFS to larger disks for 400-600G+ tests and future scale tests. |
 | A3802/B580/890 unavailable or partially unavailable | Reduces fallback choices | Repair access before depending on them in the production plan. |
