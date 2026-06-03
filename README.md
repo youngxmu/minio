@@ -32,6 +32,7 @@ SeaweedFS Filer HTTP：通过
 | `production-migration-runbook.md` | 生产迁移 runbook 草案 |
 | `server-resource-inventory.md` | 服务器硬件、存储状态与任务分配建议 |
 | `hot-cold-tiering-analysis.md` | MinIO 热冷分层改造方案分析 |
+| `dual-minio-io-test-plan.md` | 双 MinIO 热冷分层 IO 对比测试方案 |
 | `run-migration-test.sh` | 4070 上可执行的迁移测试脚本 |
 | `miniochat.md` | 参考建议原文 |
 
