@@ -22,17 +22,49 @@ We need two comparable scenarios:
 
 ## 2. Selected Server
 
-Use 4070S `172.16.100.217`.
+Use 4070S `172.16.100.217` as the storage server.
 
 Reasons:
 
 ```text
-Single server is enough for first controlled IO test.
+4070S should primarily carry MinIO and disk IO.
 Root disk is NVMe SSD: WD_BLACK SN770 500GB, 346G currently free.
 HDD data disks are online:
   /data/data2 ~11T XFS
   /data/data3 ~11T XFS
 Existing production-like services can remain untouched by using isolated ports and directories.
+```
+
+Client roles:
+
+| Role | Server | Purpose |
+| --- | --- | --- |
+| Storage | 4070S `172.16.100.217` | Run HDD-only MinIO, cold HDD MinIO, hot SSD MinIO. |
+| Web upload/download simulator | A380 `172.16.100.132` | Generate upload traffic to 4070S and simulate user downloads. |
+| Transcode simulator | A770 `172.16.100.56` | Read raw objects from 4070S and write output objects back to 4070S. |
+| Optional extra transcode simulator | A380 `172.16.100.132` | Add transcode pressure if A770 alone is insufficient. |
+
+This gives a more realistic path:
+
+```text
+web upload client on A380
+  -> network
+  -> 4070S MinIO
+
+transcode simulator on A770
+  -> GET raw from 4070S HDD MinIO
+  -> PUT output to 4070S HDD-only or SSD-hot MinIO
+
+download/push simulator on A380/A770
+  -> GET output from 4070S
+```
+
+Execution constraint:
+
+```text
+Do not run upload/download/transcode pressure clients on 4070S during the benchmark.
+4070S should only run MinIO, disk metrics collection, and the optional local archive worker.
+This keeps 4070S representative of a storage server receiving traffic from web and transcode hosts.
 ```
 
 Storage allocation:
@@ -130,14 +162,14 @@ http://127.0.0.1:19200
 All operations hit one HDD-backed MinIO:
 
 ```text
-1. Upload raw objects -> hdd-only-raw
+1. A380 uploads raw objects -> hdd-only-raw
 2. Transcode simulation:
-   GET raw from hdd-only-raw
-   PUT output to hdd-only-output
+   A770 GET raw from hdd-only-raw
+   A770 PUT output to hdd-only-output
 3. User download simulation:
-   concurrent GET from hdd-only-output
+   A380 concurrent GET from hdd-only-output
 4. Push simulation:
-   concurrent GET from hdd-only-output
+   A770 or A380 concurrent GET from hdd-only-output
 ```
 
 Expected bottleneck:
@@ -170,16 +202,16 @@ SSD MinIO: http://127.0.0.1:19400
 Operations:
 
 ```text
-1. Upload raw objects -> HDD dual-raw
+1. A380 uploads raw objects -> HDD dual-raw
 2. Transcode simulation:
-   GET raw from HDD dual-raw
-   PUT output to SSD dual-output-hot
+   A770 GET raw from HDD dual-raw
+   A770 PUT output to SSD dual-output-hot
 3. User download simulation:
-   concurrent GET from SSD dual-output-hot
+   A380 concurrent GET from SSD dual-output-hot
 4. Push simulation:
-   concurrent GET from SSD dual-output-hot
+   A770 or A380 concurrent GET from SSD dual-output-hot
 5. Archive simulation:
-   copy SSD dual-output-hot -> HDD dual-output-archive
+   4070S local archive worker copies SSD dual-output-hot -> HDD dual-output-archive
    archive copy must be rate-limited
 ```
 
@@ -301,7 +333,11 @@ object size/concurrency does not match production pressure
 3. Create HDD test directories under /data/data2/dual-minio-io-test.
 4. Start three isolated MinIO containers.
 5. Create test buckets.
-6. Install or prepare benchmark client.
+6. Copy benchmark client script to A380, A770, and 4070S.
+7. Run a small end-to-end smoke test:
+   A380 PUT raw -> 4070S HDD MinIO
+   A770 GET raw + PUT output -> 4070S hot MinIO
+   A380 GET output -> 4070S hot MinIO
 ```
 
 ### Phase B: Baseline HDD-only
@@ -370,5 +406,108 @@ After the first full run, decide:
 Recommended next action:
 
 ```text
-Approve Phase A preparation on 4070S.
+Run Phase B/C calibration with small generated objects, then scale to the default 80GiB workload.
+```
+
+## 12. Phase A Execution Record
+
+Date: 2026-06-03
+
+Storage server:
+
+```text
+4070S 172.16.100.217
+```
+
+Client roles used:
+
+```text
+A380 172.16.100.132:
+  web upload simulator
+  web download simulator
+
+A770 172.16.100.56:
+  transcode simulator
+  optional output read/push simulator
+```
+
+Isolated test endpoints:
+
+| Role | Endpoint | Backing path |
+| --- | --- | --- |
+| Baseline HDD-only MinIO | `http://172.16.100.217:19200` | `/data/data2/dual-minio-io-test/hdd-only` |
+| Dual cold HDD MinIO | `http://172.16.100.217:19300` | `/data/data2/dual-minio-io-test/cold-hdd` |
+| Dual hot SSD MinIO | `http://172.16.100.217:19400` | `/mnt/minio-hot-ssd-test/minio-hot` |
+
+Prepared storage:
+
+```text
+SSD loopback image: /opt/dual-minio-io-test/hot-ssd-200g.img
+SSD mount: /mnt/minio-hot-ssd-test
+SSD filesystem: XFS
+SSD capacity: 200G total, 197G free after smoke
+
+HDD path: /data/data2/dual-minio-io-test
+HDD filesystem: XFS
+HDD capacity: 11T total, about 11T free after smoke
+
+Root filesystem after loopback reservation: 455G total, 146G free
+```
+
+Containers started:
+
+```text
+minio_hdd_only_bench    19200/19290
+minio_cold_hdd_bench   19300/19390
+minio_hot_ssd_bench    19400/19490
+```
+
+Buckets created:
+
+```text
+hdd-only-raw
+hdd-only-output
+dual-raw
+dual-output-hot
+dual-output-archive
+```
+
+Smoke result:
+
+```text
+PASS
+
+A380 PUT raw -> 4070S HDD-only MinIO:
+  2 x 1MiB, errors=0
+
+A380 PUT raw -> 4070S cold-HDD MinIO:
+  2 x 1MiB, errors=0
+
+A770 GET raw + PUT output -> 4070S HDD-only MinIO:
+  2 x 1MiB, errors=0
+
+A770 GET raw from cold-HDD + PUT output to hot-SSD:
+  2 x 1MiB, errors=0
+
+A380 GET output from HDD-only and hot-SSD:
+  2 x 1MiB each, errors=0
+
+A770 GET hot output:
+  2 x 1MiB, errors=0
+```
+
+Benchmark helper location:
+
+```text
+local repo: scripts/dual_minio_s3bench.py
+4070S: /root/dual-minio-io-test/dual_minio_s3bench.py
+A380: /home/user/dual-minio-io-test/dual_minio_s3bench.py
+A770: /home/user/dual-minio-io-test/dual_minio_s3bench.py
+```
+
+Credential handling:
+
+```text
+Test-only credentials are stored in env files on the test hosts.
+Do not commit credentials to this repository.
 ```
