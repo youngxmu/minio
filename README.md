@@ -37,6 +37,8 @@ SeaweedFS Filer HTTP：通过
 | `real-video-io-saturation-test-plan.md` | 使用真实 `input.MOV` 的单 HDD 饱和与 SSD+HDD 对照压力测试方案 |
 | `real-video-io-saturation-results-2026-06-03.md` | 2026-06-03 使用真实 `input.MOV` 的 4070S 本地存储饱和压测结果 |
 | `real-video-link1g-results-2026-06-03.md` | 2026-06-03 修复到 1Gbps 后的 A380/A770/4070S 完整链路压测结果 |
+| `raw-ssd-archive-test-plan.md` | raw 原片先写 SSD、后台归档 HDD 的测试方案 |
+| `raw-ssd-archive-results-2026-06-03.md` | raw 原片先写 SSD、后台归档 HDD 的 S2-a 实测结果 |
 | `video-location-index-design.md` | `videoId` 到 SSD/HDD 对象位置索引设计，供测试和后续 Java 改造参考 |
 | `run-migration-test.sh` | 4070 上可执行的迁移测试脚本 |
 | `scripts/dual_minio_s3bench.py` | S3/MinIO PUT、GET、transcode、push 模拟工具 |
