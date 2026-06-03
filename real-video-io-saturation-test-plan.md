@@ -42,6 +42,23 @@ A770 -> 4070S: 100Mbps full duplex
 4070S -> A380/A770: 100Mbps full duplex
 ```
 
+Measured TCP memory-stream throughput on 2026-06-03:
+
+| Direction | Sender MiB/s | Sender Mbit/s | Receiver MiB/s | Receiver Mbit/s |
+| --- | ---: | ---: | ---: | ---: |
+| A380 -> 4070S | 11.343 | 95.152 | 11.170 | 93.703 |
+| A770 -> 4070S | 11.297 | 94.762 | 11.216 | 94.090 |
+| 4070S -> A380 | 11.371 | 95.391 | 11.188 | 93.848 |
+| 4070S -> A770 | 11.319 | 94.949 | 11.221 | 94.127 |
+
+Storage inventory relevant to local-bypass tests:
+
+| Host | Relevant disks | Suitability |
+| --- | --- | --- |
+| 4070S | `sda/sdb` 10.9T HDD, NVMe root | Best current storage target for SSD+HDD design, but remote clients are limited by 100Mbps. |
+| A770 | one 476.9G NVMe root, no HDD observed | Not suitable for reproducing single-HDD MinIO contention. Running "web upload" locally here would test SSD/root, not HDD. |
+| A380 | four 14.6T HDDs plus NVMe root | Suitable fallback for a single-host local MinIO saturation test if 4070S network cannot be fixed. |
+
 This is not enough to reproduce a production-like storage bottleneck. With 100Mbps, each client is capped around 11MiB/s, so increasing upload concurrency mostly queues on the network rather than saturating 4070S disk IO.
 
 Performance-valid requirement:
@@ -71,6 +88,30 @@ Pass criteria before final run:
 ```
 
 If links remain 100Mbps, run only a functional rehearsal or a separate storage-only saturation test from 4070S local processes. Do not use that as the production-like comparison.
+
+Important decision:
+
+```text
+Running the web upload simulator on A770 does not remove the bottleneck while MinIO remains on 4070S.
+A770 still reaches 4070S through the same 100Mbps network path.
+
+To remove the bandwidth limit, the upload simulator must run on the same host as the tested MinIO storage,
+or the storage server must move to a host whose web/transcode clients are not network-limited.
+```
+
+Practical fallback options:
+
+```text
+Option A: keep 4070S as storage and fix the 4070S/A380/A770 network links first.
+  This is the preferred production-like test.
+
+Option B: run local upload/transcode/push simulators on 4070S against 4070S MinIO.
+  This can saturate 4070S HDD, but it is a storage-only test, not a realistic cross-host chain.
+
+Option C: move the isolated MinIO test to A380 and run local upload on A380.
+  A380 has multiple HDDs and can reproduce HDD contention locally.
+  It will not directly test 4070S hardware, but it can validate the single-HDD vs SSD+HDD architecture under local IO pressure.
+```
 
 ## 3. Test Objective
 
