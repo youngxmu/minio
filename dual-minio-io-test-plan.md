@@ -511,3 +511,100 @@ Credential handling:
 Test-only credentials are stored in env files on the test hosts.
 Do not commit credentials to this repository.
 ```
+
+## 13. Calibration Record
+
+Date: 2026-06-03
+
+Run id:
+
+```text
+calib-20260603-01
+```
+
+Scale:
+
+```text
+Preload raw:
+  8 x 128MiB for HDD-only
+  8 x 128MiB for dual cold-HDD
+
+Preload output:
+  4 x 128MiB for HDD-only
+  4 x 128MiB for dual hot-SSD
+
+Mixed window:
+  A380 PUT 4 x 128MiB
+  A770 GET raw + PUT output, 4 x 128MiB
+  A380 GET output, 4 x 128MiB
+  A770 GET output, 4 x 128MiB
+  dual only: 4070S local archive worker, 4 x 128MiB, concurrency=1
+```
+
+Preload result:
+
+| Phase | Path | Operations | Wall seconds | Throughput MiB/s | Errors |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Raw upload | A380 -> HDD-only | 8 x 128MiB | 107.081 | 9.563 | 0 |
+| Raw upload | A380 -> dual cold-HDD | 8 x 128MiB | 99.491 | 10.292 | 0 |
+| Output preload | A770 HDD-only transcode simulation | 4 x 128MiB | 91.253 | 11.222 | 0 |
+| Output preload | A770 dual transcode simulation | 4 x 128MiB | 108.742 | 9.417 | 0 |
+
+Mixed workload result:
+
+| Scenario | Operation | Operations | Wall seconds | Throughput MiB/s | P95 seconds | Errors |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| HDD-only | A380 PUT raw | 4 x 128MiB | 49.884 | 10.264 | 49.882 | 0 |
+| HDD-only | A770 transcode simulation | 4 x 128MiB | 181.806 | 5.632 | 181.804 | 0 |
+| HDD-only | A380 GET output | 4 x 128MiB | 138.947 | 3.685 | 138.946 | 0 |
+| HDD-only | A770 GET output | 4 x 128MiB | 141.473 | 3.619 | 141.472 | 0 |
+| Dual | A380 PUT raw to cold-HDD | 4 x 128MiB | 47.902 | 10.688 | 47.901 | 0 |
+| Dual | A770 transcode simulation to hot-SSD | 4 x 128MiB | 184.205 | 5.559 | 184.203 | 0 |
+| Dual | A380 GET hot output | 4 x 128MiB | 140.703 | 3.639 | 140.701 | 0 |
+| Dual | A770 GET hot output | 4 x 128MiB | 138.765 | 3.690 | 138.764 | 0 |
+| Dual | 4070S archive hot -> cold | 4 x 128MiB | 3.439 | 297.733 | 1.313 | 0 |
+
+4070S disk metrics:
+
+| Scenario | Device | Avg read MB/s | Avg write MB/s | Avg r_await ms | Avg w_await ms | Avg util % |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| HDD-only | `sda` HDD | 7.232 | 5.315 | 6.348 | 4.643 | 7.439 |
+| HDD-only | `nvme0n1` SSD | 0.001 | 0.100 | 0.030 | 0.520 | 0.139 |
+| Dual | `sda` HDD | 2.733 | 5.036 | 4.526 | 2.815 | 4.874 |
+| Dual | `nvme0n1` SSD | 0.000 | 2.324 | 0.000 | 0.581 | 0.213 |
+
+Network link check:
+
+| Host | Interface | Current link |
+| --- | --- | --- |
+| A380 `172.16.100.132` | `eno1` | 100Mbps full duplex |
+| A770 `172.16.100.56` | `eno2` | 100Mbps full duplex |
+| 4070S `172.16.100.217` | `eno1` | 100Mbps full duplex |
+
+Interpretation:
+
+```text
+This calibration is functionally valid but not performance-valid for the HDD saturation question.
+
+Observed application throughput is close to the 100Mbps network ceiling.
+4070S HDD util stayed low in both scenarios, so the test did not reproduce the target "single HDD MinIO saturated by mixed IO" condition.
+
+Dual MinIO reduced 4070S HDD read traffic and await in the sample, but user-visible GET and transcode throughput did not improve because the client/storage network path is the dominant bottleneck.
+```
+
+Required adjustment before a full 80GiB run:
+
+```text
+Fix or replace the network path so A380, A770, and 4070S negotiate at least 1Gbps.
+Prefer 2.5Gbps or 10Gbps if the production bottleneck is HDD IO rather than 100Mbps access links.
+
+Do not run the 80GiB workload on the current 100Mbps links; it will mostly measure network ceiling and consume too much time.
+```
+
+Current test footprint:
+
+```text
+/data/data2/dual-minio-io-test: 4.6G
+/mnt/minio-hot-ssd-test/minio-hot: 1.1G
+/root/dual-minio-io-test/results/calib-20260603-01: 5.9M
+```
