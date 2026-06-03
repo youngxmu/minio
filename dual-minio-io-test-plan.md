@@ -20,6 +20,15 @@ We need two comparable scenarios:
 1. Baseline: one HDD MinIO handles all raw files, outputs, downloads, and push reads.
 2. New design: HDD MinIO stores raw and archive copies; SSD MinIO stores hot outputs and serves downloads/push reads.
 
+The complete chain must include the push task after transcode completion:
+
+```text
+transcode output ready
+  -> update videoId location index
+  -> trigger push task
+  -> push task resolves videoId, prefers SSD, then GETs the object
+```
+
 ## 2. Selected Server
 
 Use 4070S `172.16.100.217` as the storage server.
@@ -42,6 +51,7 @@ Client roles:
 | Storage | 4070S `172.16.100.217` | Run HDD-only MinIO, cold HDD MinIO, hot SSD MinIO. |
 | Web upload/download simulator | A380 `172.16.100.132` | Generate upload traffic to 4070S and simulate user downloads. |
 | Transcode simulator | A770 `172.16.100.56` | Read raw objects from 4070S and write output objects back to 4070S. |
+| Push simulator | A380/A770 | Resolve output by `videoId`, then simulate push download reads. |
 | Optional extra transcode simulator | A380 `172.16.100.132` | Add transcode pressure if A770 alone is insufficient. |
 
 This gives a more realistic path:
@@ -56,6 +66,7 @@ transcode simulator on A770
   -> PUT output to 4070S HDD-only or SSD-hot MinIO
 
 download/push simulator on A380/A770
+  -> resolve videoId from local index
   -> GET output from 4070S
 ```
 
@@ -169,6 +180,7 @@ All operations hit one HDD-backed MinIO:
 3. User download simulation:
    A380 concurrent GET from hdd-only-output
 4. Push simulation:
+   A770 or A380 resolves videoId from the location index
    A770 or A380 concurrent GET from hdd-only-output
 ```
 
@@ -209,7 +221,8 @@ Operations:
 3. User download simulation:
    A380 concurrent GET from SSD dual-output-hot
 4. Push simulation:
-   A770 or A380 concurrent GET from SSD dual-output-hot
+   A770 or A380 resolves videoId from the location index
+   A770 or A380 concurrent GET from SSD dual-output-hot, falling back to HDD archive only after hot eviction
 5. Archive simulation:
    4070S local archive worker copies SSD dual-output-hot -> HDD dual-output-archive
    archive copy must be rate-limited
@@ -281,7 +294,9 @@ retry count
 | HDD util during mixed load | measured | measured | lower |
 | HDD await during mixed load | measured | measured | lower |
 | Output GET P95 | measured | measured | lower |
+| Push GET P95 | measured | measured | lower |
 | Output GET throughput | measured | measured | higher |
+| Push GET throughput | measured | measured | higher |
 | Transcode simulation throughput | measured | measured | higher or stable |
 | Archive lag | n/a | measured | bounded |
 | Error rate | measured | measured | no increase |
@@ -334,10 +349,12 @@ object size/concurrency does not match production pressure
 4. Start three isolated MinIO containers.
 5. Create test buckets.
 6. Copy benchmark client script to A380, A770, and 4070S.
-7. Run a small end-to-end smoke test:
+7. Initialize the videoId location index.
+8. Run a small end-to-end smoke test:
    A380 PUT raw -> 4070S HDD MinIO
    A770 GET raw + PUT output -> 4070S hot MinIO
-   A380 GET output -> 4070S hot MinIO
+   update videoId index -> active_tier=ssd
+   A380 push resolves videoId -> GET output from 4070S hot MinIO
 ```
 
 ### Phase B: Baseline HDD-only
@@ -345,9 +362,11 @@ object size/concurrency does not match production pressure
 ```text
 1. Generate test objects or stream generated data.
 2. Run upload-only warmup.
-3. Run mixed workload against HDD-only MinIO.
-4. Collect metrics.
-5. Verify object counts and sizes.
+3. Register HDD-only output locations in the videoId index.
+4. Run mixed workload against HDD-only MinIO.
+5. Run push simulation by videoId.
+6. Collect metrics.
+7. Verify object counts, object sizes, and push read counts.
 ```
 
 ### Phase C: Dual MinIO
@@ -356,9 +375,12 @@ object size/concurrency does not match production pressure
 1. Use the same workload definition.
 2. Raw upload and raw reads go to HDD MinIO.
 3. Output writes and hot reads go to SSD MinIO.
-4. Archive copy runs in background with controlled concurrency.
-5. Collect metrics.
-6. Verify object counts and sizes across hot and archive buckets.
+4. Transcode completion registers hot SSD output in the videoId index.
+5. Push simulation resolves videoId and prefers SSD.
+6. Archive copy runs in background with controlled concurrency.
+7. Archive completion registers HDD copy without switching active_tier while SSD exists.
+8. Collect metrics.
+9. Verify object counts, object sizes, push read counts, and index state.
 ```
 
 ### Phase D: Compare
@@ -376,9 +398,11 @@ object size/concurrency does not match production pressure
 1. Stop isolated MinIO containers.
 2. Remove test containers.
 3. Remove HDD test directories.
-4. Unmount SSD loopback filesystem.
-5. Delete 200G loopback image.
-6. Confirm existing services are still healthy.
+4. Remove hot SSD test objects.
+5. Remove the videoId index DB for the run.
+6. Optionally remove result logs.
+7. Optionally unmount SSD loopback filesystem and delete the 200G image.
+8. Confirm existing services are still healthy.
 ```
 
 ## 10. Risks and Controls
@@ -389,6 +413,9 @@ object size/concurrency does not match production pressure
 | Existing MinIO/SeaweedFS ports conflict | Use isolated ports `19200-19490`. |
 | Current services affected by CPU or IO pressure | Run first test at lower concurrency; stop if system load affects existing services. |
 | HDD archive copy hides hot-tier benefit | Rate-limit archive workers and measure archive separately. |
+| Push task reads from the wrong tier | Resolve every push by `videoId`; record resolved tier and push count. |
+| Stale index data affects later rounds | Use the reset script before every full test round. |
+| Multi-round tests fill SSD/HDD | Clean test buckets, index DB, and results after each round. |
 | Loopback SSD is not final SSD performance | Treat results as architecture signal, not final hardware benchmark. |
 | Synthetic objects differ from video files | Use large sequential objects first; add smaller mixed objects later if needed. |
 
@@ -494,6 +521,10 @@ A380 GET output from HDD-only and hot-SSD:
 
 A770 GET hot output:
   2 x 1MiB, errors=0
+
+A380 push simulation by videoId -> hot SSD MinIO:
+  1 x 1MiB, errors=0
+  push_count updated to 1
 ```
 
 Benchmark helper location:
@@ -607,4 +638,86 @@ Current test footprint:
 /data/data2/dual-minio-io-test: 4.6G
 /mnt/minio-hot-ssd-test/minio-hot: 1.1G
 /root/dual-minio-io-test/results/calib-20260603-01: 5.9M
+```
+
+## 14. Missing Chain Items Added
+
+The next test round must use these additions:
+
+```text
+1. A770 writes transcode output.
+2. The test harness registers videoId -> output location.
+3. Push simulation is triggered after output registration.
+4. Push simulation resolves videoId with prefer=ssd.
+5. Push simulation GETs from SSD when hot_present=1.
+6. Archive worker copies SSD output to HDD and registers cold location.
+7. Hot cleanup can evict SSD only after cold_present=1.
+8. Later push reads fall back to HDD after hot eviction.
+```
+
+Scripts:
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/video_location_index.py` | Maintains the SQLite `videoId` location index for tests. |
+| `scripts/dual_minio_s3bench.py push` | Simulates push download IO by resolving `videoId` from the index. |
+| `scripts/reset_dual_minio_test.sh` | Cleans isolated MinIO test data, index DB, and optional result logs. |
+
+Default index paths:
+
+```text
+4070S: /root/dual-minio-io-test/video-location-index.sqlite3
+A380/A770 push clients: /home/user/dual-minio-io-test/video-location-index.sqlite3
+```
+
+For controlled benchmark runs, the index can be generated deterministically on the push client before the push phase. Production must replace this with one authoritative Java-accessible store.
+
+Push simulation example:
+
+```bash
+python3 video_location_index.py \
+  --db video-location-index.sqlite3 \
+  register-range \
+  --tier ssd \
+  --video-prefix round01-dual-video- \
+  --object-prefix round01-dual-out- \
+  --count 160 \
+  --endpoint-name hot-ssd \
+  --endpoint http://172.16.100.217:19400 \
+  --bucket dual-output-hot \
+  --size-bytes 536870912
+
+python3 dual_minio_s3bench.py push \
+  --index-db video-location-index.sqlite3 \
+  --video-prefix round01-dual-video- \
+  --count 160 \
+  --prefer ssd \
+  --concurrency 64 \
+  --record-push
+```
+
+Reset before a new full round:
+
+```bash
+sudo bash scripts/reset_dual_minio_test.sh --yes --remove-results
+```
+
+Use `--remove-loopback` only when the 200G SSD loopback image should be removed. Normal multi-round testing should keep the loopback mounted and only clean object data and the index DB.
+
+Validation completed:
+
+```text
+A380 push smoke:
+  registered smoke-dual-video-000000 -> smoke-dual-out-000000.bin
+  resolved prefer=ssd -> http://172.16.100.217:19400 / dual-output-hot
+  push GET 1 x 1MiB, errors=0
+  push_count=1
+
+4070S reset dry-run:
+  verified container removal commands
+  verified HDD test data cleanup paths
+  verified hot SSD test data cleanup path
+  verified index DB cleanup path
+  verified optional results cleanup path
+  no deletion executed without --yes
 ```

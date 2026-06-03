@@ -33,7 +33,11 @@ SeaweedFS Filer HTTP：通过
 | `server-resource-inventory.md` | 服务器硬件、存储状态与任务分配建议 |
 | `hot-cold-tiering-analysis.md` | MinIO 热冷分层改造方案分析 |
 | `dual-minio-io-test-plan.md` | 双 MinIO 热冷分层 IO 对比测试方案 |
+| `video-location-index-design.md` | `videoId` 到 SSD/HDD 对象位置索引设计，供测试和后续 Java 改造参考 |
 | `run-migration-test.sh` | 4070 上可执行的迁移测试脚本 |
+| `scripts/dual_minio_s3bench.py` | S3/MinIO PUT、GET、transcode、push 模拟工具 |
+| `scripts/video_location_index.py` | 本地 SQLite 位置索引维护工具 |
+| `scripts/reset_dual_minio_test.sh` | 多轮双 MinIO 测试 reset/clean 脚本 |
 | `miniochat.md` | 参考建议原文 |
 
 ## 安全约定

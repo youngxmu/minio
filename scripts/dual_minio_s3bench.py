@@ -7,6 +7,7 @@ import hmac
 import http.client
 import json
 import os
+import sqlite3
 import statistics
 import sys
 import time
@@ -165,13 +166,17 @@ def request(endpoint, method, path, access_key, secret_key, body_iter=None, leng
         conn.close()
 
 
+def s3_object_path(bucket, key):
+    return "/" + bucket + "/" + urllib.parse.quote(key, safe="/-_.~")
+
+
 def object_key(prefix, index):
     return "{prefix}{idx:06d}.bin".format(prefix=prefix, idx=index)
 
 
 def put_object(endpoint, access_key, secret_key, bucket, prefix, index, size_mib):
     key = object_key(prefix, index)
-    path = "/" + bucket + "/" + urllib.parse.quote(key, safe="/-_.~")
+    path = s3_object_path(bucket, key)
     size = size_mib * MB
     return request(
         endpoint,
@@ -186,7 +191,12 @@ def put_object(endpoint, access_key, secret_key, bucket, prefix, index, size_mib
 
 def get_object(endpoint, access_key, secret_key, bucket, prefix, index):
     key = object_key(prefix, index)
-    path = "/" + bucket + "/" + urllib.parse.quote(key, safe="/-_.~")
+    path = s3_object_path(bucket, key)
+    return request(endpoint, "GET", path, access_key, secret_key)
+
+
+def get_object_key(endpoint, access_key, secret_key, bucket, key):
+    path = s3_object_path(bucket, key)
     return request(endpoint, "GET", path, access_key, secret_key)
 
 
@@ -199,14 +209,19 @@ def make_bucket(endpoint, access_key, secret_key, bucket):
 
 
 def run_parallel(name, count, concurrency, func):
+    results, wall = run_items(range(count), concurrency, func)
+    print_summary(name, results, wall)
+
+
+def run_items(items, concurrency, func):
     started = time.monotonic()
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = [executor.submit(func, index) for index in range(count)]
+        futures = [executor.submit(func, item) for item in items]
         for future in concurrent.futures.as_completed(futures):
             results.append(future.result())
     wall = time.monotonic() - started
-    print_summary(name, results, wall)
+    return results, wall
 
 
 def percentile(values, pct):
@@ -309,6 +324,116 @@ def cmd_transcode(args):
     run_parallel("transcode", args.count, args.concurrency, one)
 
 
+def location_for_tier(row, tier):
+    if tier == "ssd" and row["hot_present"]:
+        return {
+            "tier": "ssd",
+            "endpoint": row["hot_endpoint"],
+            "bucket": row["hot_bucket"],
+            "key": row["hot_key"],
+        }
+    if tier == "hdd" and row["cold_present"]:
+        return {
+            "tier": "hdd",
+            "endpoint": row["cold_endpoint"],
+            "bucket": row["cold_bucket"],
+            "key": row["cold_key"],
+        }
+    return None
+
+
+def resolve_video_location(conn, video_id, prefer):
+    row = conn.execute("SELECT * FROM video_object WHERE video_id = ?", (video_id,)).fetchone()
+    if not row:
+        raise KeyError("video_id not found: {0}".format(video_id))
+    if prefer == "active":
+        order = [row["active_tier"], "ssd", "hdd"]
+    elif prefer == "ssd":
+        order = ["ssd", "hdd"]
+    else:
+        order = ["hdd", "ssd"]
+    seen = set()
+    for tier in order:
+        if not tier or tier in seen:
+            continue
+        seen.add(tier)
+        location = location_for_tier(row, tier)
+        if location:
+            location["video_id"] = video_id
+            return location
+    raise KeyError("no usable location for video_id: {0}".format(video_id))
+
+
+def video_ids_from_args(args):
+    video_ids = []
+    if args.video_id:
+        video_ids.extend(args.video_id)
+    if args.video_prefix is not None:
+        if args.count is None:
+            raise SystemExit("--count is required with --video-prefix")
+        for index in range(args.start_index, args.start_index + args.count):
+            video_ids.append("{prefix}{idx:06d}".format(prefix=args.video_prefix, idx=index))
+    if not video_ids:
+        raise SystemExit("pass --video-id or --video-prefix with --count")
+    return video_ids
+
+
+def record_push_success(conn, video_id):
+    timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn.execute(
+        """
+        UPDATE video_object
+        SET push_count = push_count + 1,
+            last_push_at = ?,
+            updated_at = ?
+        WHERE video_id = ?
+        """,
+        (timestamp, timestamp, video_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO video_location_history
+        (video_id, event, note, created_at)
+        VALUES (?, 'push_read', 'dual_minio_s3bench push', ?)
+        """,
+        (video_id, timestamp),
+    )
+
+
+def cmd_push(args):
+    access_key, secret_key = get_creds(args)
+    video_ids = video_ids_from_args(args)
+    index_conn = sqlite3.connect(args.index_db)
+    index_conn.row_factory = sqlite3.Row
+    locations = {}
+    for video_id in video_ids:
+        locations[video_id] = resolve_video_location(index_conn, video_id, args.prefer)
+    index_conn.close()
+
+    def one(video_id):
+        location = locations[video_id]
+        result = get_object_key(
+            location["endpoint"],
+            access_key,
+            secret_key,
+            location["bucket"],
+            location["key"],
+        )
+        result["video_id"] = video_id
+        result["tier"] = location["tier"]
+        return result
+
+    results, wall = run_items(video_ids, args.concurrency, one)
+    if args.record_push:
+        write_conn = sqlite3.connect(args.index_db)
+        for result in results:
+            if result["ok"]:
+                record_push_success(write_conn, result["video_id"])
+        write_conn.commit()
+        write_conn.close()
+    print_summary("push", results, wall)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description="S3-compatible MinIO benchmark helper")
     parser.add_argument("--access-key")
@@ -348,6 +473,17 @@ def build_parser():
     transcode.add_argument("--output-size-mib", type=int, required=True)
     transcode.add_argument("--concurrency", type=int, default=8)
     transcode.set_defaults(func=cmd_transcode)
+
+    push = sub.add_parser("push")
+    push.add_argument("--index-db", required=True)
+    push.add_argument("--video-id", action="append")
+    push.add_argument("--video-prefix")
+    push.add_argument("--count", type=int)
+    push.add_argument("--start-index", type=int, default=0)
+    push.add_argument("--prefer", choices=["active", "ssd", "hdd"], default="ssd")
+    push.add_argument("--concurrency", type=int, default=8)
+    push.add_argument("--record-push", action="store_true")
+    push.set_defaults(func=cmd_push)
 
     return parser
 
