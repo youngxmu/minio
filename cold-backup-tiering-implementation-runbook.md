@@ -1,0 +1,689 @@
+# Cold Backup MinIO Tiering Implementation Runbook
+
+> Date: 2026-06-04
+> Branch: `codex/cold-backup-tiering-test`
+> Goal: move historical object payloads from multiple full old MinIO servers to a shared cold-backup MinIO, while keeping business access through the original old MinIO host/bucket/key.
+
+## 1. Executive Decision
+
+Use MinIO lifecycle transition to a remote MinIO tier. Do not manually move object files out of MinIO data directories.
+
+Target behavior:
+
+```text
+client/business still reads old-minio-host/source-bucket/object-key
+old MinIO keeps object metadata and the original namespace
+old MinIO transitions object payload data to cold MinIO
+old MinIO fetches cold payload data from cold MinIO on reads
+```
+
+This solves:
+
+```text
+free old MinIO data disk space
+increase write headroom on old independent MinIO servers
+keep existing user-facing object URLs stable
+```
+
+This does not solve:
+
+```text
+old MinIO metadata disaster recovery
+removing the old MinIO service
+direct user reads from the cold MinIO path
+source-side directory/object-count scaling by itself
+```
+
+## 2. Version Requirements
+
+### 2.1 Production Requirement
+
+For production, treat version alignment as mandatory.
+
+Recommended first production baseline:
+
+| Component | Required baseline |
+| --- | --- |
+| Old MinIO source servers | same tested MinIO release |
+| Cold MinIO target | same tested MinIO release as sources |
+| Management `mc` | healthy MinIO Client released closest to the server release date |
+
+Current tested release:
+
+```text
+RELEASE.2025-09-07T16-13-09Z
+```
+
+Reason from our smoke test:
+
+```text
+A380 source MinIO 2025 -> old 4070S MinIO 2022 failed transition with Bad sha256.
+A380 source MinIO 2025 -> 4070S cold MinIO 2025 succeeded.
+```
+
+Operational rule:
+
+```text
+Do not run production transition from a newer source MinIO to an older cold target MinIO.
+Do not mix old independent source versions in one migration wave unless that exact combination passed smoke tests.
+For the first real production wave, use the same MinIO binary version on all participating old sources and the cold target.
+```
+
+### 2.2 `mc` Requirement
+
+`mc` is a management client, not the storage service. It does not need to run on every MinIO server.
+
+It must run on at least one management host that can reach:
+
+```text
+all old source MinIO endpoints
+the cold target MinIO endpoint
+```
+
+Required `mc` capabilities:
+
+```text
+mc alias set
+mc admin info
+mc ilm tier add
+mc ilm tier check
+mc ilm tier info
+mc ilm tier ls
+mc ilm rule add
+mc ilm rule ls
+mc ilm rule export
+mc ilm rule rm
+mc stat
+mc cat
+```
+
+Production rule:
+
+```text
+Use a MinIO Client released closest to the MinIO Server release date.
+Pin and record the binary version before starting.
+Do not rely on broken or unknown local mc binaries.
+Do not use the OS package named mc if it is Midnight Commander.
+If the binary is named mcli to avoid a command-name conflict, use mcli consistently.
+```
+
+Minimum practical requirement:
+
+```text
+mc must support the mc ilm tier and mc ilm rule command families.
+If only old mc admin tier commands are available, upgrade mc before migration.
+```
+
+Validation:
+
+```bash
+MC=/opt/minio-tools/mc
+
+$MC --version
+$MC alias set old1 http://OLD1_ENDPOINT ACCESS_KEY SECRET_KEY
+$MC alias set cold http://COLD_ENDPOINT ACCESS_KEY SECRET_KEY
+$MC admin info old1
+$MC admin info cold
+$MC ilm tier ls old1
+$MC ilm rule ls old1/source-bucket
+```
+
+### 2.3 Upgrade Rule
+
+Before upgrading any production MinIO:
+
+```text
+1. Snapshot or back up service definitions and environment files.
+2. Back up MinIO configuration and IAM state where supported.
+3. Record current minio --version and mc --version.
+4. Run the same upgrade on a test source and test cold target first.
+5. Confirm health, object GET/PUT, lifecycle export, tier check, and one-object transition.
+```
+
+For clustered MinIO deployments, all nodes in one cluster must run the same MinIO binary version before proceeding. For our current old sources, each old MinIO is independent, so upgrade and validate them one at a time.
+
+## 3. Official References
+
+Use these as the command authority:
+
+```text
+Remote MinIO tiering:
+https://docs.min.io/aistor/administration/object-lifecycle-management/object-tiering/transition-objects-to-minio/
+
+Add remote tier:
+https://docs.min.io/aistor/reference/cli/mc-ilm-tier/mc-ilm-tier-add/
+
+Add lifecycle transition rule:
+https://docs.min.io/aistor/reference/cli/mc-ilm-rule/mc-ilm-rule-add/
+
+MinIO Client reference and version alignment:
+https://docs.min.io/aistor/reference/cli/
+
+MinIO Linux upgrade:
+https://docs.min.io/aistor/upgrade-aistor-server/upgrade-aistor-linux/
+```
+
+## 4. Target Topology
+
+Production pattern:
+
+```text
+old-minio-1  \
+old-minio-2   \
+old-minio-3    -> shared cold MinIO target
+...           /
+old-minio-N  /
+```
+
+User-facing access remains on each old MinIO:
+
+```text
+http://old-minio-N/source-bucket/object-key
+```
+
+The cold MinIO path is not user-facing. MinIO stores transitioned objects under internal per-deployment identifiers and optional remote-tier prefixes.
+
+## 5. Namespace And Bucket Mapping
+
+Because old MinIO servers are independent, two servers may contain the same bucket/key path. The cold target must isolate sources.
+
+Recommended mapping:
+
+| Source | Source bucket | Cold bucket | Remote tier prefix |
+| --- | --- | --- | --- |
+| old1 | `sucaiwang` | `tier-old1-sucaiwang` | `old1/` |
+| old2 | `sucaiwang` | `tier-old2-sucaiwang` | `old2/` |
+| old3 | `legacy-b` | `tier-old3-legacy-b` | `old3/` |
+
+Preferred rule:
+
+```text
+Use one cold bucket per source MinIO bucket.
+Also set a clear prefix that points back to the source MinIO.
+Do not allow business code, users, or migration scripts to write directly into cold-tier buckets.
+Do not use the cold-tier bucket as a normal backup bucket.
+```
+
+If cold bucket count becomes operationally inconvenient, use one bucket per source server and one prefix per source bucket:
+
+```text
+cold bucket: tier-old1
+prefix: old1/sucaiwang/
+```
+
+Do not combine multiple old sources into the same cold bucket without a source-specific prefix.
+
+## 6. Pre-Implementation Inventory
+
+Create one row per old MinIO server:
+
+| Field | Required value |
+| --- | --- |
+| source id | stable name, for example `old1` |
+| endpoint | internal URL |
+| MinIO version | `minio --version` |
+| service type | systemd or Docker |
+| data paths | all MinIO data disks or volumes |
+| buckets | bucket list and approximate object count |
+| top prefixes | heavy user prefixes and object counts |
+| current lifecycle rules | export XML before change |
+| existing remote tiers | `mc ilm tier ls` or admin API output |
+| disk usage | `df -B1` and bucket-level `du` where safe |
+| health | readiness endpoint and `mc admin info` |
+| access credentials | stored outside this repo |
+
+Commands:
+
+```bash
+minio --version
+systemctl is-active minio-local.service || true
+docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' | grep -i minio || true
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9000/minio/health/ready
+df -B1 /data/data1 /data/data2 /data/data3 /data/data4 2>/dev/null || true
+```
+
+With `mc`:
+
+```bash
+$MC admin info old1
+$MC ls old1
+$MC ilm tier ls old1
+$MC ilm rule ls old1/source-bucket
+$MC ilm rule export old1/source-bucket > old1-source-bucket-lifecycle-before.xml
+```
+
+## 7. Cold Target Build
+
+### 7.1 Capacity
+
+Cold target usable capacity must cover:
+
+```text
+sum(old payload bytes to transition)
++ MinIO erasure/parity overhead if using distributed erasure
++ metadata overhead
++ growth during migration
++ at least 20% operational headroom
+```
+
+For first production wave, do not target a cold MinIO that is itself near full.
+
+### 7.2 Storage
+
+Cold data can use HDD. Recommended:
+
+```text
+dedicated disks or dedicated mount paths
+XFS preferred for large object stores
+no root disk for object data
+no mixed unrelated large workloads on the same mount during transition windows
+```
+
+### 7.3 Service
+
+Use the same MinIO release as the first wave of old sources.
+
+For systemd deployment:
+
+```bash
+/usr/local/bin/minio --version
+systemctl status minio-cold.service
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9000/minio/health/ready
+```
+
+For Docker deployment:
+
+```bash
+docker inspect cold-minio > cold-minio.inspect.json
+docker exec cold-minio minio --version
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9000/minio/health/ready
+```
+
+Do not change an existing cold target service from Docker to systemd in production without a rollback window and service backup. In the test, switching 4070S from old Docker MinIO to 2025 systemd MinIO was necessary because transition failed against the old target.
+
+## 8. Credentials And Permissions
+
+Create a dedicated cold-tier access key per old source, or at least per migration wave.
+
+Required cold bucket permissions:
+
+```text
+s3:PutObject
+s3:GetObject
+s3:DeleteObject
+s3:ListBucket
+s3:GetBucketLocation
+s3:AbortMultipartUpload
+s3:ListBucketMultipartUploads
+s3:ListMultipartUploadParts
+```
+
+Operational rules:
+
+```text
+Do not use root credentials for production transition rules.
+Do not store access keys in this repo.
+Rotate or disable migration-only credentials after the wave if they are no longer needed.
+Keep the credentials valid as long as transitioned objects must remain readable from the old MinIO.
+```
+
+Important: the source MinIO uses the configured cold-tier credentials for future reads. Do not delete or disable these credentials while transitioned objects still exist.
+
+## 9. Source Preflight
+
+Before configuring a source:
+
+```text
+1. Confirm source MinIO is healthy.
+2. Confirm source and cold target versions are aligned.
+3. Confirm cold target bucket exists and is empty or intentionally assigned.
+4. Export current lifecycle rules.
+5. Export or record current tier configuration.
+6. Disable unrelated broad lifecycle rules that could create background noise.
+7. Select a single smoke object that is safe to transition.
+```
+
+Do not start with a broad full-bucket rule.
+
+Smoke object selection:
+
+```text
+real video object
+>= 100 MB if possible
+not actively being uploaded or overwritten
+exact key known
+business owner accepts slower first cold read
+```
+
+Baseline measurements:
+
+```bash
+$MC stat old1/source-bucket/object-key
+$MC cat old1/source-bucket/object-key | sha256sum
+
+for n in 1 2 3 4; do
+  du -sb "/data/data$n/source-bucket/object-key" 2>/dev/null || true
+done
+df -B1 /data/data1 /data/data2 /data/data3 /data/data4
+```
+
+## 10. Configure Remote Tier
+
+Example variables:
+
+```bash
+MC=/opt/minio-tools/mc
+SOURCE_ALIAS=old1
+SOURCE_BUCKET=sucaiwang
+TIER_NAME=COLD_OLD1_SUCAIWANG
+COLD_ENDPOINT=http://cold-minio.example.internal:9000
+COLD_BUCKET=tier-old1-sucaiwang
+COLD_PREFIX=old1/sucaiwang/
+```
+
+Create cold bucket:
+
+```bash
+$MC mb cold/${COLD_BUCKET}
+```
+
+Add tier on the source MinIO:
+
+```bash
+$MC ilm tier add minio ${SOURCE_ALIAS} ${TIER_NAME} \
+  --endpoint "${COLD_ENDPOINT}" \
+  --access-key "${COLD_ACCESS_KEY}" \
+  --secret-key "${COLD_SECRET_KEY}" \
+  --bucket "${COLD_BUCKET}" \
+  --prefix "${COLD_PREFIX}" \
+  --storage-class STANDARD
+```
+
+Verify tier:
+
+```bash
+$MC ilm tier ls ${SOURCE_ALIAS}
+$MC ilm tier info ${SOURCE_ALIAS} ${TIER_NAME}
+$MC ilm tier check ${SOURCE_ALIAS} ${TIER_NAME}
+```
+
+Expected:
+
+```text
+tier exists
+tier check succeeds
+endpoint, bucket, prefix, storage class match the implementation sheet
+```
+
+## 11. Configure Lifecycle Rules
+
+### 11.1 Smoke Rule
+
+Use one exact key prefix first:
+
+```bash
+SMOKE_PREFIX='sucaiwang/200001/5/dba000ae-bc3f-4f1a-a600-7c4aec1c57a5.mp4'
+
+$MC ilm rule add ${SOURCE_ALIAS}/${SOURCE_BUCKET} \
+  --prefix "${SMOKE_PREFIX}" \
+  --transition-tier "${TIER_NAME}" \
+  --transition-days 0
+```
+
+Verify:
+
+```bash
+$MC ilm rule ls ${SOURCE_ALIAS}/${SOURCE_BUCKET} --transition
+$MC ilm rule export ${SOURCE_ALIAS}/${SOURCE_BUCKET} > old1-sucaiwang-lifecycle-after-smoke.xml
+```
+
+### 11.2 User-Prefix Rule
+
+After smoke passes, migrate a controlled user prefix:
+
+```bash
+USER_PREFIX='sucaiwang/200001/'
+
+$MC ilm rule add ${SOURCE_ALIAS}/${SOURCE_BUCKET} \
+  --prefix "${USER_PREFIX}" \
+  --transition-tier "${TIER_NAME}" \
+  --transition-days 0
+```
+
+This phase should be limited to a known object count, for example 10 to 100 videos, until throughput and read impact are measured.
+
+### 11.3 Production Batch Rule
+
+Only after multiple prefix tests pass:
+
+```bash
+$MC ilm rule add ${SOURCE_ALIAS}/${SOURCE_BUCKET} \
+  --prefix "${BATCH_PREFIX}" \
+  --transition-tier "${TIER_NAME}" \
+  --transition-days 45
+```
+
+Batching rules:
+
+```text
+Start with one old source server.
+Start with one bucket.
+Start with one low-risk prefix.
+Increase only one dimension per wave: source count, bucket count, prefix count, or age window.
+Do not re-enable a broad full-bucket rule until the rollback and monitoring playbook has been exercised.
+```
+
+## 12. Monitoring During Transition
+
+Track these every 5 to 15 minutes during a wave:
+
+| Area | Check |
+| --- | --- |
+| Source health | readiness endpoint, `mc admin info`, process logs |
+| Source disk | `df -B1`, selected object `du -sb`, inode usage |
+| Cold health | readiness endpoint, `mc admin info`, process logs |
+| Cold disk | `df -B1`, cold bucket `du -sb`, inode usage |
+| Lifecycle | rule export, transition-related log lines |
+| Read path | sample GET from old source endpoint |
+| Data correctness | size, ETag where usable, SHA256 sample |
+| Latency | GET first-byte and full-read timing before/after transition |
+| Network | cold target ingress and source egress |
+
+Useful commands:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' http://SOURCE/minio/health/ready
+curl -sS -o /dev/null -w '%{http_code}\n' http://COLD/minio/health/ready
+
+$MC admin info old1
+$MC admin info cold
+$MC stat old1/source-bucket/object-key
+$MC cat old1/source-bucket/object-key | sha256sum
+
+journalctl -u minio-local.service --since '30 minutes ago' --no-pager | grep -Ei 'transition|tier|COLD|sha|error'
+journalctl -u minio-cold.service --since '30 minutes ago' --no-pager | grep -Ei 'tier|error|sha'
+```
+
+For data-flow proof in smoke:
+
+```bash
+tcpdump -n -i any host SOURCE_IP and port 9000 -c 20
+```
+
+Expected proof:
+
+```text
+GET through source returns 200
+Storage-Class or object metadata indicates COLD where exposed
+read checksum matches baseline
+packet capture shows source MinIO talking to cold MinIO during read
+```
+
+## 13. Acceptance Criteria
+
+Smoke wave passes only if all are true:
+
+```text
+source MinIO health remains 200
+cold MinIO health remains 200
+selected source object footprint shrinks to metadata/stub scale
+cold target receives object payload files
+source endpoint GET returns 200
+read-back byte count equals baseline
+read-back SHA256 equals baseline
+no new Bad sha256 or transition failure logs after the version-aligned test window
+old broad lifecycle rules remain disabled
+```
+
+Prefix wave passes only if all are true:
+
+```text
+all sampled objects read successfully through the original source endpoint
+sampled SHA256 or size checks pass
+source disk freed bytes match expected object payload scale
+cold target used bytes increase within expected range
+normal uploads and reads remain within agreed latency/error budget
+directory and inode metrics remain healthy
+```
+
+## 14. Rollback And Stop Conditions
+
+### 14.1 Stop Conditions
+
+Immediately stop expanding the wave if any of these occur:
+
+```text
+source MinIO health fails
+cold MinIO health fails
+new transition failures appear
+Bad sha256 appears
+sample read from source fails
+business upload error rate rises
+source or cold target disk reaches critical watermark
+network saturation affects active service
+```
+
+### 14.2 Safe Stop
+
+Disable or remove newly added lifecycle rules:
+
+```bash
+$MC ilm rule ls old1/source-bucket --transition
+$MC ilm rule rm old1/source-bucket --id RULE_ID
+```
+
+If removal is too risky during incident response, export the lifecycle first and apply an edited XML with the new rule disabled.
+
+Do not delete cold target data during an incident. Transitioned source metadata may depend on it.
+
+### 14.3 Rehydration
+
+MinIO tiering is not designed as a simple "undo all transitioned data" operation.
+
+For a small number of objects, a controlled rehydration can be tested as:
+
+```text
+1. Disable the lifecycle rule that would immediately transition the object again.
+2. Read the object through the source MinIO S3 API.
+3. Write the object back to the source bucket/key under a tested overwrite/versioning policy.
+4. Verify source disk footprint, object metadata, and checksum.
+```
+
+For many objects, do not improvise. Build a separate rehydration plan and test it on a prefix first.
+
+## 15. Directory And Object-Count Risk
+
+The earlier concern about `bucket/{userid}` remains real.
+
+Tiering moves payload bytes, but it keeps the source object namespace and source metadata. Therefore:
+
+```text
+source-side bucket/key paths still exist as metadata/stub entries
+source-side directory count may remain high
+source-side listing pressure may not disappear
+cold-side storage may be organized under MinIO internal tier prefixes, but that does not remove the source namespace problem
+```
+
+Before broad migration, measure:
+
+```bash
+find /data/data1/source-bucket/user-prefix -maxdepth 1 -type d | wc -l
+find /data/data1/source-bucket/user-prefix -type f | wc -l
+df -i /data/data1 /data/data2 /data/data3 /data/data4
+time $MC ls --recursive old1/source-bucket/user-prefix >/tmp/list.out
+```
+
+If the problem is disk capacity, tiering helps.
+
+If the problem is filesystem directory entry pressure, inode pressure, or slow listing under a huge user prefix, tiering may only partially help. That case needs a separate namespace redesign or application-level routing strategy.
+
+## 16. Rollout Plan
+
+### Phase 0: Tooling
+
+- [ ] Pick one management host on the same internal network as all MinIO endpoints.
+- [ ] Install a pinned healthy `mc`.
+- [ ] Record `mc --version`.
+- [ ] Verify `mc admin info` on source and cold target.
+- [ ] Store credentials outside this repo.
+
+### Phase 1: Cold Target
+
+- [ ] Build or choose cold MinIO storage.
+- [ ] Align cold target MinIO to the tested source release.
+- [ ] Create cold buckets for one source bucket.
+- [ ] Create dedicated cold-tier credentials.
+- [ ] Confirm cold target PUT/GET with a normal temporary object.
+
+### Phase 2: One-Object Smoke
+
+- [ ] Export existing source lifecycle rules.
+- [ ] Disable unrelated broad rules.
+- [ ] Add remote tier.
+- [ ] Add one exact-key transition rule.
+- [ ] Wait for transition.
+- [ ] Verify source footprint shrink.
+- [ ] Verify cold target payload increase.
+- [ ] GET through original source endpoint and compare checksum.
+- [ ] Capture source-to-cold data flow during read.
+
+### Phase 3: Small Prefix
+
+- [ ] Select one user prefix with 10 to 100 videos.
+- [ ] Record object count, bytes, and baseline read samples.
+- [ ] Add prefix rule.
+- [ ] Monitor until transition completes.
+- [ ] Verify sampled reads and checksums.
+- [ ] Record disk freed and cold target growth.
+
+### Phase 4: Production Wave
+
+- [ ] Choose one old MinIO server and one bucket.
+- [ ] Choose age or prefix window.
+- [ ] Run during low business load.
+- [ ] Monitor every 5 to 15 minutes.
+- [ ] Keep the wave small enough to stop manually.
+- [ ] Review logs and sampled reads before expanding.
+
+### Phase 5: Expansion
+
+- [ ] Add more prefixes on the same source only after the first source passes.
+- [ ] Add another source only after the first source has stable 24-hour reads.
+- [ ] Keep one source per wave until operational confidence is high.
+
+## 17. Production Readiness Checklist
+
+- [ ] All participating MinIO server versions are recorded.
+- [ ] All participating MinIO server versions are aligned for the wave.
+- [ ] `mc` version is recorded and compatible.
+- [ ] Current lifecycle rules are exported.
+- [ ] Current tier configuration is exported or recorded.
+- [ ] Cold target has enough free capacity and inode headroom.
+- [ ] Cold target credentials are dedicated and stored safely.
+- [ ] Broad lifecycle rules are disabled before smoke.
+- [ ] Smoke object passed checksum after transition.
+- [ ] One user-prefix wave passed.
+- [ ] Stop conditions are agreed with operations and business owners.
+- [ ] Rollback stop procedure is rehearsed.
+- [ ] Monitoring owner is assigned during migration windows.
+
