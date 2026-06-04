@@ -35,6 +35,7 @@ SeaweedFS Filer HTTP：通过
 | `cold-backup-tiering-test-plan.md` | 旧 MinIO 数据 transition 到冷备 MinIO 的单对象验证方案 |
 | `cold-backup-tiering-results-2026-06-04.md` | 2026-06-04 A380 单对象 transition 到 4070S 冷备 MinIO 的实测结果 |
 | `cold-backup-tiering-implementation-runbook.md` | 旧 MinIO 数据转层到冷备 MinIO 的生产实施方案和版本要求 |
+| `minio-tier-version-compat-results-2026-06-04.md` | 2026-06-04 MinIO 2022-11-08 与 2023-12-23 同版本冷备 tiering 兼容性实测 |
 | `dual-minio-io-test-plan.md` | 双 MinIO 热冷分层 IO 对比测试方案 |
 | `dual-minio-pressure-results-2026-06-03.md` | 2026-06-03 单 HDD vs SSD+HDD 压力测试结果 |
 | `real-video-io-saturation-test-plan.md` | 使用真实 `input.MOV` 的单 HDD 饱和与 SSD+HDD 对照压力测试方案 |

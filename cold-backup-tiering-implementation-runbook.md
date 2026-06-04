@@ -38,27 +38,37 @@ source-side directory/object-count scaling by itself
 
 ### 2.1 Production Requirement
 
-For production, treat version alignment as mandatory.
+For production, treat version alignment as mandatory for each migration wave.
+
+Same-version compatibility smoke results:
+
+| Source MinIO | Cold MinIO | Result | Evidence |
+| --- | --- | --- | --- |
+| `RELEASE.2022-11-08T05-27-07Z` | `RELEASE.2022-11-08T05-27-07Z` | PASS | `minio-tier-version-compat-results-2026-06-04.md` |
+| `RELEASE.2023-12-23T07-19-11Z` | `RELEASE.2023-12-23T07-19-11Z` | PASS | `minio-tier-version-compat-results-2026-06-04.md` |
+| `RELEASE.2025-09-07T16-13-09Z` | `RELEASE.2025-09-07T16-13-09Z` | PASS | `cold-backup-tiering-results-2026-06-04.md` |
 
 Recommended first production baseline:
 
 | Component | Required baseline |
 | --- | --- |
-| Old MinIO source servers | same tested MinIO release |
-| Cold MinIO target | same tested MinIO release as sources |
+| Old MinIO source servers | keep current production version for the first validation wave |
+| Cold MinIO target | same release as the source servers in that wave |
 | Management `mc` | healthy MinIO Client released closest to the server release date |
 
-Current tested release:
+Current production-main release has now passed isolated same-version smoke:
 
 ```text
-RELEASE.2025-09-07T16-13-09Z
+RELEASE.2022-11-08T05-27-07Z
 ```
 
-Reason from our smoke test:
+Reasoning from the smoke tests:
 
 ```text
 A380 source MinIO 2025 -> old 4070S MinIO 2022 failed transition with Bad sha256.
 A380 source MinIO 2025 -> 4070S cold MinIO 2025 succeeded.
+4070S isolated MinIO 2022 -> isolated MinIO 2022 succeeded.
+4070S isolated MinIO 2023 -> isolated MinIO 2023 succeeded.
 ```
 
 Operational rule:
@@ -66,7 +76,8 @@ Operational rule:
 ```text
 Do not run production transition from a newer source MinIO to an older cold target MinIO.
 Do not mix old independent source versions in one migration wave unless that exact combination passed smoke tests.
-For the first real production wave, use the same MinIO binary version on all participating old sources and the cold target.
+For the first real production wave, use the same MinIO binary version on the selected old source and its cold target.
+Do not upgrade the old 64T production sources before same-version 2022 production-like smoke testing.
 ```
 
 ### 2.2 `mc` Requirement
@@ -100,11 +111,18 @@ mc cat
 Production rule:
 
 ```text
-Use a MinIO Client released closest to the MinIO Server release date.
+Use a healthy MinIO Client that supports the ILM tier/rule command family.
 Pin and record the binary version before starting.
 Do not rely on broken or unknown local mc binaries.
 Do not use the OS package named mc if it is Midnight Commander.
 If the binary is named mcli to avoid a command-name conflict, use mcli consistently.
+```
+
+Observed:
+
+```text
+mc RELEASE.2023-12-23T08-47-21Z successfully configured both RELEASE.2022-11-08T05-27-07Z and RELEASE.2023-12-23T07-19-11Z servers for this isolated smoke test.
+However, mc ilm tier info in the container image panicked due to missing infocmp, so use a validated host binary for production operations.
 ```
 
 Minimum practical requirement:
@@ -686,4 +704,3 @@ If the problem is filesystem directory entry pressure, inode pressure, or slow l
 - [ ] Stop conditions are agreed with operations and business owners.
 - [ ] Rollback stop procedure is rehearsed.
 - [ ] Monitoring owner is assigned during migration windows.
-
