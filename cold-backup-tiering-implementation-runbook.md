@@ -173,6 +173,54 @@ Add supported replication or explicit archive copy before broad transition.
 Treat transition + DB mapping recovery as an experiment, not production DR, until a full restore drill passes.
 ```
 
+### Can one new MinIO be both cold tier and new upload node?
+
+Yes, with strict bucket and credential isolation.
+
+Validated layout:
+
+```text
+newminio1/tier-oldminio1-sucaiwang
+  purpose: oldminio1 cold-tier target
+  user-facing: no
+  stored in current business DB: no
+  stored in recovery mapping DB: yes
+
+newminio1/web-upload-sucaiwang
+  purpose: normal new web uploads
+  user-facing: yes, through normal business URL generation
+  stored in current business DB: yes
+```
+
+The isolated same-version test on 2026-06-05 passed:
+
+```text
+oldminio1 RELEASE.2022-11-08T05-27-07Z -> newminio1 RELEASE.2022-11-08T05-27-07Z cold tier
+newminio1 simultaneously accepted normal web uploads
+cold internal key was discovered and recorded in a mapping row
+oldminio1 was stopped
+mapping + newminio1 cold object restored the original bucket/key into a fresh MinIO
+checksum matched
+```
+
+Evidence:
+
+```text
+minio-hybrid-role-mapping-recovery-results-2026-06-05.md
+```
+
+Operational requirements:
+
+```text
+1. Use separate buckets for cold-tier data and normal web uploads.
+2. Use separate access keys and policies for tiering and web upload paths.
+3. Apply quotas or capacity alarms per bucket/prefix where possible.
+4. Monitor newminio1 IO, latency, and error rate for both workloads separately.
+5. Do not put cold-tier internal URLs into the existing business object table.
+6. Store cold-tier internal keys only in a dedicated recovery mapping table.
+7. Do not expose tier buckets directly to users.
+```
+
 ## 2. Version Requirements
 
 ### 2.1 Production Requirement
