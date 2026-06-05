@@ -690,6 +690,34 @@ Expected object roles per `videoId`:
 
 The exact column names must be confirmed from the production `video` table and related tables. Do not hard-code the five roles until the table snapshot confirms them.
 
+Known `video_raw_url` derivation rule:
+
+```text
+Initial upload:
+  video_raw_url = {prefix}.{suffix}
+
+After transcode:
+  video_raw_url = {prefix}_h265.{suffix}
+
+From the post-transcode video_raw_url:
+  source_upload     = {prefix}.{suffix}
+  watermark_source  = {prefix}_mark919.{suffix}
+  transcoded_video  = {prefix}_h265.{suffix}
+```
+
+Example verified on A380:
+
+```text
+bucket: sucaiwang
+prefix: sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae
+
+source_upload:    sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae.MOV
+watermark_source: sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae_mark919.MOV
+transcoded_video: sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae_h265.MOV
+```
+
+The inner domain `kaifa-sucaiwang-inner.sucaicloud.com` resolved to A380 `172.16.100.132` in the smoke test, and the three derived objects returned HEAD 200 through both nginx and direct MinIO `9000`.
+
 Create a business manifest before any lifecycle rule:
 
 | Field | Required |

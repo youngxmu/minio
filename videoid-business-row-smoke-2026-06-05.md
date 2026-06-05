@@ -8,10 +8,10 @@
 
 ## 1. Result
 
-Smoke result:
+Smoke result after business-rule clarification:
 
 ```text
-PARTIAL / NOT YET PASSED
+PARTIAL PASS
 ```
 
 What passed:
@@ -21,13 +21,14 @@ The `video` row contains direct object reference fields.
 The row can produce a first-pass business object manifest.
 A380 host MinIO was healthy during the check.
 Signed S3 HEAD verification against A380 MinIO worked for known existing objects.
+The corrected `video_raw_url` derivation rule produced 3 A380 MinIO objects that all returned HEAD 200.
 ```
 
 What did not pass:
 
 ```text
-The 3 object references in this row were not found on A380 host MinIO under the tested bucket/key mappings.
-This sample does not yet prove that `videoId -> object group -> A380 MinIO` works.
+The JSON row file and the later confirmed business URL do not contain the same object path.
+This sample proves the `video_raw_url -> source/watermark/transcode` trio, but not yet the full cover/playback 5-role group from one fresh DB query.
 ```
 
 ## 2. Row Summary
@@ -71,8 +72,9 @@ ls_uri
 Observation:
 
 ```text
-This single `video` row exposes 3 direct object references, not the full 5-role model by itself.
-The missing roles may be represented by related tables, derived URLs, or historical pipeline behavior.
+This JSON file exposed 3 direct object fields.
+Later business clarification showed `video_raw_url` is also a derivation root for 3 related video files.
+The JSON row path did not match the later confirmed A380 object path, so production smoke must query the live DB row and storage route together.
 ```
 
 ## 3. A380 Validation Environment
@@ -134,6 +136,56 @@ Directory shape observed on A380:
 
 The observed A380 address tree exists, but this row's `96/9961` path did not appear in the tested location.
 
+## 4.5 Corrected `video_raw_url` Derivation Check
+
+Business clarification:
+
+```text
+On initial upload:
+  video_raw_url = {prefix}.{suffix}
+
+After transcode:
+  video_raw_url = {prefix}_h265.{suffix}
+
+Derived source upload:
+  {prefix}.{suffix}
+
+Derived watermark source:
+  {prefix}_mark919.{suffix}
+
+Derived transcoded video:
+  {prefix}_h265.{suffix}
+```
+
+Confirmed transcode URL for `videoId=14708948`:
+
+```text
+https://kaifa-sucaiwang-inner.sucaicloud.com/sucaiwang/sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae_h265.MOV
+```
+
+DNS result:
+
+```text
+kaifa-sucaiwang-inner.sucaicloud.com -> 172.16.100.132
+```
+
+Derived A380 MinIO object manifest:
+
+| Role | Bucket | Key | HEAD | Size | ETag |
+| --- | --- | --- | --- | ---: | --- |
+| `source_upload` | `sucaiwang` | `sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae.MOV` | `200` | `107204861` | `"b2b75cf8baa9100f3af24fe779e5ed4e-21"` |
+| `watermark_source` | `sucaiwang` | `sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae_mark919.MOV` | `200` | `38044089` | `"2b4c0466b46f72a891c193e4b9d01e4a-8"` |
+| `transcoded_video` | `sucaiwang` | `sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae_h265.MOV` | `200` | `7167813` | `"a93db920e95a39a707ae35b25af17fe6-2"` |
+
+Both public inner-domain HEAD and direct A380 MinIO HEAD passed:
+
+```text
+https://kaifa-sucaiwang-inner.sucaicloud.com/<bucket>/<key> -> 200
+http://172.16.100.132:9000/<bucket>/<key> -> 200
+```
+
+This confirms the `video_raw_url` derivation rule for the 3 video payload roles.
+
 ## 5. Interpretation
 
 This row supports the planned manifest concept, but not yet the storage-location assumption.
@@ -142,18 +194,18 @@ Current interpretation:
 
 ```text
 video table row -> direct object references: yes
-direct references -> A380 host MinIO objects: not confirmed for this sample
-videoId 14708948 as a positive A380 migration smoke sample: not passed
+video_raw_url derivation -> source/watermark/transcode objects: confirmed on A380 for the corrected URL
+cover_url and playback video_url from the same fresh DB row: still need live DB confirmation
+videoId 14708948 as a full 5-role migration smoke sample: not complete yet
 ```
 
 Possible reasons:
 
 ```text
-1. The row belongs to another MinIO/source endpoint, not A380.
-2. The business URL path requires a storage-router transform that is not captured by the row alone.
-3. The object was deleted, moved, or never existed on A380.
-4. The full 5-file video object group is stored across related tables rather than only this `video` row.
-5. The expected host is not the A380 host MinIO on `9000`.
+1. The downloaded JSON row may not be from the same DB/environment as the confirmed A380 object.
+2. The business URL path requires a storage-router transform that must be queried or encoded explicitly.
+3. Cover and playback objects still need to be validated from the fresh DB row.
+4. The full 5-file video object group may include both direct row fields and derived fields.
 ```
 
 ## 6. Next Checks
