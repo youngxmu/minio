@@ -23,6 +23,24 @@ sha256 内容校验：通过
 SeaweedFS Filer HTTP：通过
 ```
 
+2026-06-05 冷备 MinIO 分支已完成真实前缀迁移和恢复验证：
+
+```text
+A380 真实前缀 15 个对象 transition 到 4070S 冷备 MinIO：通过
+原 A380 host/bucket/key 读取：通过
+source 对象路径空间从 635331560 bytes 降到 144912 bytes：通过
+冷端新增约 317 MB payload：通过
+映射表恢复到 fresh MinIO：通过
+```
+
+当前冷备方向：
+
+```text
+MinIO lifecycle transition 用于释放旧 MinIO 磁盘空间。
+恢复映射必须在迁移批次中生成，不能等源 MinIO metadata 丢失后再补。
+如果要求严格灾备，还需要复制、归档或经过大规模恢复演练的 mapping recovery。
+```
+
 ## 文件索引
 
 | 文件 | 说明 |
@@ -32,9 +50,12 @@ SeaweedFS Filer HTTP：通过
 | `production-migration-runbook.md` | 生产迁移 runbook 草案 |
 | `server-resource-inventory.md` | 服务器硬件、存储状态与任务分配建议 |
 | `hot-cold-tiering-analysis.md` | MinIO 热冷分层改造方案分析 |
+| `cold-backup-migration-overview.md` | 冷备 MinIO 迁移方向总览，包含当前结论、拓扑和证据索引 |
 | `cold-backup-tiering-test-plan.md` | 旧 MinIO 数据 transition 到冷备 MinIO 的单对象验证方案 |
 | `cold-backup-tiering-results-2026-06-04.md` | 2026-06-04 A380 单对象 transition 到 4070S 冷备 MinIO 的实测结果 |
 | `cold-backup-tiering-implementation-runbook.md` | 旧 MinIO 数据转层到冷备 MinIO 的生产实施方案和版本要求 |
+| `cold-backup-data-recovery-runbook.md` | 冷备数据恢复 runbook，说明迁移中如何处理 source 到 cold 的映射关系 |
+| `real-prefix-tiering-results-2026-06-05.md` | 2026-06-05 A380 真实前缀 15 对象 transition、映射和恢复实测结果 |
 | `minio-tier-version-compat-results-2026-06-04.md` | 2026-06-04 MinIO 2022-11-08 与 2023-12-23 同版本冷备 tiering 兼容性实测 |
 | `cold-tier-mapping-recovery-test-plan.md` | 冷端映射表恢复可行性测试方案，用于验证源端 metadata 丢失后的自研恢复可能性 |
 | `minio-hybrid-role-mapping-recovery-results-2026-06-05.md` | 2026-06-05 `newminio1` 同时承接冷层和新上传，并用映射表恢复的实测结果 |
