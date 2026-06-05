@@ -42,6 +42,11 @@ Normal business access:
 New writes:
   allow newminio1 to accept normal web uploads in isolated business buckets
 
+Migration selection:
+  select old business videoId rows first
+  resolve every MinIO object that belongs to each videoId
+  migrate the complete video object group, not isolated objects by object age
+
 Recovery after old metadata loss:
   generate a dedicated mapping table during migration
   run restore drills before calling it production recovery
@@ -55,6 +60,43 @@ oldminio1/source-bucket/object-key
   -> oldminio1 metadata/stub remains
   -> payload transitions to newminio1 cold-tier bucket
   -> user still reads oldminio1/source-bucket/object-key
+```
+
+## 2.1 Business Migration Unit
+
+Do not use "objects older than one year" as the direct migration rule.
+
+Use time only to select candidate `videoId` rows from the business database. The migration unit should be the complete video object group.
+
+Expected MinIO object roles per `videoId`:
+
+| Role | Meaning |
+| --- | --- |
+| `source_upload` | user-uploaded source file |
+| `cover` | cover image |
+| `watermark_source` | watermarked original or watermark input file |
+| `transcoded_video` | transcoded output video |
+| `playback_video` | final playback video |
+
+The exact database columns and object keys must be confirmed from the `video` table and related tables before production. The manifest should record all resolved keys and mark whether each role is required or optional.
+
+Correct selection flow:
+
+```text
+1. Query video table for candidate videoId rows, for example videos created more than one year ago.
+2. Resolve the expected MinIO objects for each videoId.
+3. HEAD every object through the source MinIO endpoint.
+4. Classify the videoId as COMPLETE, PARTIAL, ACTIVE, UNKNOWN_LAYOUT, or SKIP.
+5. Only migrate COMPLETE videoId groups in the first production waves.
+6. Store business_video_id, user_id, file_role, bucket, key, size, ETag, and SHA256 in the source manifest.
+```
+
+Why this matters:
+
+```text
+If only some objects under one videoId are moved, business reads and later recovery can become inconsistent.
+If the source upload is cold but the playback file is hot, access behavior is hard to reason about.
+If the cover remains hot but the video payload is cold, recovery drills no longer represent the business object as a whole.
 ```
 
 ## 3. Target Topology
@@ -122,13 +164,13 @@ If source metadata is lost and no mapping was generated, the cold bucket alone i
 Required migration-time mapping workflow:
 
 ```text
-1. Build source manifest before transition.
+1. Build a videoId-grouped source manifest before transition.
 2. Snapshot cold bucket/prefix before transition.
-3. Transition a controlled prefix or batch.
+3. Transition a controlled videoId group, prefix, or batch.
 4. Snapshot cold bucket/prefix after transition.
 5. Diff new cold objects.
 6. Read candidates through cold MinIO S3 API.
-7. Match by size and strong checksum.
+7. Match by videoId, file role, size, and strong checksum.
 8. Mark exact, duplicate, ambiguous, or failed rows.
 9. Store verified mapping rows before expanding the wave.
 10. Run periodic restore drills using only mapping DB plus cold MinIO.
@@ -160,9 +202,10 @@ Ready for the next internal validation:
 ```text
 one source server
 one source bucket
-one controlled prefix
+one controlled set of candidate videoId rows
 same MinIO version on source and cold target
 mapping generated during the wave
+all expected file roles resolved and verified
 restore drill after transition
 ```
 

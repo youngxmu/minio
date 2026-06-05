@@ -74,6 +74,10 @@ CREATE TABLE cold_tier_object_mapping (
   id BIGINT PRIMARY KEY,
   source_id VARCHAR(64) NOT NULL,
   source_endpoint_alias VARCHAR(128) NOT NULL,
+  business_video_id BIGINT NOT NULL,
+  user_id BIGINT,
+  file_role VARCHAR(64) NOT NULL,
+  required_role BOOLEAN NOT NULL DEFAULT TRUE,
   source_bucket VARCHAR(255) NOT NULL,
   source_key TEXT NOT NULL,
   source_version_id VARCHAR(255) NOT NULL DEFAULT '',
@@ -89,6 +93,9 @@ CREATE TABLE cold_tier_object_mapping (
   cold_prefix TEXT NOT NULL,
   cold_object_key TEXT,
   transition_batch_id VARCHAR(128) NOT NULL,
+  business_create_time DATETIME,
+  business_update_time DATETIME,
+  video_status VARCHAR(64),
   transition_time DATETIME,
   match_status VARCHAR(32) NOT NULL,
   verify_status VARCHAR(32) NOT NULL,
@@ -100,6 +107,9 @@ CREATE TABLE cold_tier_object_mapping (
 
 CREATE UNIQUE INDEX uk_source_object
   ON cold_tier_object_mapping(source_id, source_bucket, source_key, source_version_id);
+
+CREATE INDEX idx_business_video
+  ON cold_tier_object_mapping(source_id, business_video_id, file_role);
 
 CREATE INDEX idx_cold_object
   ON cold_tier_object_mapping(cold_endpoint_alias, cold_bucket, cold_object_key(255));
@@ -129,6 +139,10 @@ Before adding the lifecycle transition rule, record:
 ```text
 source_id
 source endpoint alias
+business videoId
+user id
+file role
+required or optional role
 source bucket
 source key
 version id if enabled
@@ -138,10 +152,27 @@ SHA256
 content-type
 user metadata
 last modified
+business create/update time
+video status
 batch id
 ```
 
 The checksum should be computed through the source MinIO S3 API, not by reading MinIO disk part files.
+
+Business rule:
+
+```text
+Use time to select candidate videoId rows from the business database.
+Do not use MinIO object age as the direct business migration rule.
+For each selected videoId, resolve the expected object roles before transition:
+  source_upload
+  cover
+  watermark_source
+  transcoded_video
+  playback_video
+```
+
+Rows with missing required roles should be marked `PARTIAL` and skipped in the first production waves.
 
 ### Step 2: Snapshot Cold Prefix Before
 
@@ -165,7 +196,7 @@ Use a narrow lifecycle rule:
 ```text
 one source server
 one source bucket
-one prefix or one bounded object set
+one videoId group, videoId prefix, or bounded object set
 one transition batch id
 ```
 
@@ -269,11 +300,22 @@ Minimum drill:
 For larger waves:
 
 ```text
-restore at least one sample per prefix
+restore at least one complete videoId group
+restore at least one sample per source prefix if multiple prefixes are involved
 restore the largest objects
 restore recently transitioned objects
 restore duplicate payload objects
 restore objects with custom metadata if present
+```
+
+Complete videoId restore acceptance:
+
+```text
+all required file roles for the selected videoId are restored
+each restored role has the original bucket/key
+each restored role passes size and SHA256 verification
+the restored videoId can be evaluated as a complete business unit
+optional missing roles are explicitly documented
 ```
 
 ## 7. Failure Handling

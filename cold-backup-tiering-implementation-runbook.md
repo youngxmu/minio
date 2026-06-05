@@ -108,6 +108,9 @@ Mapping fields that must be recorded per transitioned object:
 | Field | Purpose |
 | --- | --- |
 | `source_id` | which old MinIO owned the object |
+| `business_video_id` | business video row that owns this object |
+| `user_id` | user owner, used for routing and audit |
+| `file_role` | source upload, cover, watermark source, transcoded video, or playback video |
 | `source_endpoint_alias` | stable source endpoint name, not necessarily raw URL |
 | `source_bucket` | original user-facing bucket |
 | `source_key` | original user-facing object key |
@@ -165,14 +168,14 @@ Batch mapping workflow:
 
 ```text
 1. Assign a transition_batch_id.
-2. Build a source manifest before transition.
+2. Build a videoId-grouped source manifest before transition.
 3. Snapshot the assigned cold bucket/prefix before transition.
-4. Add a narrow lifecycle rule for the batch.
+4. Add a narrow lifecycle rule for the batch after confirming all selected videoId object keys.
 5. Wait until selected objects transition.
 6. Snapshot the cold bucket/prefix after transition.
 7. Diff before/after cold object sets.
 8. Read cold candidates through cold MinIO S3 API.
-9. Match source rows and cold candidates by size and SHA256.
+9. Match source rows and cold candidates by business_video_id, file_role, size, and SHA256.
 10. Mark rows as EXACT, DUPLICATE_PAYLOAD, AMBIGUOUS, MISSING, or FAILED.
 11. Restore samples into a fresh MinIO and verify checksum.
 12. Remove the batch lifecycle rule, but keep the remote tier and credentials.
@@ -664,6 +667,71 @@ tier check succeeds
 endpoint, bucket, prefix, storage class match the implementation sheet
 ```
 
+## 10.5 Business Migration Unit
+
+The migration unit should be a business `videoId`, not an individual MinIO object selected only by object age.
+
+Use time as a database filter:
+
+```text
+good:  select videoId rows older than one year, then migrate every object that belongs to those videoIds
+bad:   transition every MinIO object whose object last-modified time is older than one year
+```
+
+Expected object roles per `videoId`:
+
+| Role | Meaning | First-wave policy |
+| --- | --- | --- |
+| `source_upload` | user-uploaded source file | required |
+| `cover` | cover image | required if business page depends on it |
+| `watermark_source` | watermarked original or watermark input file | confirm from video table |
+| `transcoded_video` | transcoded output video | required if referenced |
+| `playback_video` | final playback video | required |
+
+The exact column names must be confirmed from the production `video` table and related tables. Do not hard-code the five roles until the table snapshot confirms them.
+
+Create a business manifest before any lifecycle rule:
+
+| Field | Required |
+| --- | --- |
+| `transition_batch_id` | yes |
+| `source_id` | yes |
+| `business_video_id` | yes |
+| `user_id` | yes |
+| `file_role` | yes |
+| `source_bucket` | yes |
+| `source_key` | yes |
+| `required_role` | yes |
+| `object_exists` | yes |
+| `size_bytes` | yes |
+| `etag` | yes |
+| `sha256` | yes, for selected first waves |
+| `content_type` | yes where available |
+| `last_modified` | yes |
+| `business_create_time` | yes |
+| `business_update_time` | yes |
+| `video_status` | yes |
+
+Classify each `videoId` before migration:
+
+| Status | Meaning | Action |
+| --- | --- | --- |
+| `COMPLETE` | all required object roles exist and checksum passed | eligible |
+| `PARTIAL` | at least one required role is missing | skip first waves |
+| `ACTIVE` | still uploading, transcoding, or recently updated | skip |
+| `UNKNOWN_LAYOUT` | DB row cannot be mapped to stable object keys | investigate |
+
+Execution strategy:
+
+```text
+1. Prefer a clean videoId prefix if the resolved keys all live under one safe prefix, for example bucket/userId/videoId/.
+2. If the five roles are stored in different prefixes, use exact-key rules for small tests.
+3. For large production batches, validate whether the production MinIO 2022 release supports a tag-filtered transition workflow before relying on tags.
+4. If lifecycle rules become too numerous or cannot target the business object set cleanly, use explicit archive copy for the business manifest instead of forcing broad lifecycle rules.
+```
+
+Do not let a broad age-based lifecycle rule split one `videoId` group.
+
 ## 11. Configure Lifecycle Rules
 
 ### 11.1 Smoke Rule
@@ -686,24 +754,37 @@ $MC ilm rule ls ${SOURCE_ALIAS}/${SOURCE_BUCKET} --transition
 $MC ilm rule export ${SOURCE_ALIAS}/${SOURCE_BUCKET} > old1-sucaiwang-lifecycle-after-smoke.xml
 ```
 
-### 11.2 User-Prefix Rule
+### 11.2 Business VideoId Batch
 
-After smoke passes, migrate a controlled user prefix:
+After smoke passes, migrate a controlled set of `videoId` rows.
+
+If all selected object keys share a clean videoId prefix, use that prefix:
 
 ```bash
-USER_PREFIX='sucaiwang/200001/'
+VIDEO_PREFIX='sucaiwang/100192/15581/'
 
 $MC ilm rule add ${SOURCE_ALIAS}/${SOURCE_BUCKET} \
-  --prefix "${USER_PREFIX}" \
+  --prefix "${VIDEO_PREFIX}" \
   --transition-tier "${TIER_NAME}" \
   --transition-days 0
 ```
 
-This phase should be limited to a known object count, for example 10 to 100 videos, until throughput and read impact are measured.
+If the selected `videoId` has objects in different prefixes, use exact-key prefixes for a small test and record every rule id:
+
+```bash
+OBJECT_KEY='sucaiwang/100192/15581/playback-video.mp4'
+
+$MC ilm rule add ${SOURCE_ALIAS}/${SOURCE_BUCKET} \
+  --prefix "${OBJECT_KEY}" \
+  --transition-tier "${TIER_NAME}" \
+  --transition-days 0
+```
+
+This phase should be limited to a known business count, for example 10 to 100 `videoId` rows, until throughput, rule management, mapping reconciliation, and read impact are measured.
 
 ### 11.3 Production Batch Rule
 
-Only after multiple prefix tests pass:
+Only after multiple videoId-group tests pass:
 
 ```bash
 $MC ilm rule add ${SOURCE_ALIAS}/${SOURCE_BUCKET} \
@@ -717,8 +798,9 @@ Batching rules:
 ```text
 Start with one old source server.
 Start with one bucket.
-Start with one low-risk prefix.
-Increase only one dimension per wave: source count, bucket count, prefix count, or age window.
+Start with one low-risk set of COMPLETE videoId rows.
+Use age as the business DB selection filter, not as the direct MinIO object filter.
+Increase only one dimension per wave: source count, bucket count, videoId count, prefix count, or business age window.
 Do not re-enable a broad full-bucket rule until the rollback and monitoring playbook has been exercised.
 ```
 
@@ -784,14 +866,18 @@ no new Bad sha256 or transition failure logs after the version-aligned test wind
 old broad lifecycle rules remain disabled
 ```
 
-Prefix wave passes only if all are true:
+VideoId-group wave passes only if all are true:
 
 ```text
+candidate videoId rows were selected from the business DB
+all required object roles for each selected videoId were resolved before transition
+PARTIAL, ACTIVE, and UNKNOWN_LAYOUT videoId rows were excluded
 all sampled objects read successfully through the original source endpoint
 sampled SHA256 or size checks pass
 source disk freed bytes match expected object payload scale
 cold target used bytes increase within expected range
 mapping rows are generated during the same batch
+mapping rows include business_video_id and file_role
 mapping rows are reconciled as EXACT or accepted DUPLICATE_PAYLOAD
 sample restore through mapping passes into a fresh MinIO
 normal uploads and reads remain within agreed latency/error budget
@@ -841,7 +927,7 @@ For a small number of objects, a controlled rehydration can be tested as:
 4. Verify source disk footprint, object metadata, and checksum.
 ```
 
-For many objects, do not improvise. Build a separate rehydration plan and test it on a prefix first.
+For many objects, do not improvise. Build a separate rehydration plan and test it on a videoId group first.
 
 ## 15. Directory And Object-Count Risk
 
@@ -868,6 +954,14 @@ time $MC ls --recursive old1/source-bucket/user-prefix >/tmp/list.out
 If the problem is disk capacity, tiering helps.
 
 If the problem is filesystem directory entry pressure, inode pressure, or slow listing under a huge user prefix, tiering may only partially help. That case needs a separate namespace redesign or application-level routing strategy.
+
+Business grouping helps here too:
+
+```text
+Do not list a huge user prefix and migrate whatever appears old.
+Use the video table to select videoId rows, then resolve only the object keys owned by those rows.
+This limits accidental migration of unrelated objects and gives recovery a business-level audit key.
+```
 
 ## 16. Rollout Plan
 
@@ -899,26 +993,30 @@ If the problem is filesystem directory entry pressure, inode pressure, or slow l
 - [ ] GET through original source endpoint and compare checksum.
 - [ ] Capture source-to-cold data flow during read.
 
-### Phase 3: Small Prefix
+### Phase 3: Small VideoId Group
 
-- [ ] Select one user prefix with 10 to 100 videos.
-- [ ] Record object count, bytes, and baseline read samples.
+- [ ] Select 10 to 100 old candidate `videoId` rows from the business DB.
+- [ ] Confirm the expected five file roles from the `video` table and related tables.
+- [ ] Resolve bucket/key for every expected object role.
+- [ ] Exclude `PARTIAL`, `ACTIVE`, and `UNKNOWN_LAYOUT` videoId rows.
+- [ ] Record object count, bytes, videoId count, and baseline read samples.
 - [ ] Assign a transition batch id.
-- [ ] Snapshot source manifest with size, ETag, SHA256, and metadata.
+- [ ] Snapshot source manifest with videoId, file role, size, ETag, SHA256, and metadata.
 - [ ] Snapshot cold bucket/prefix before transition.
-- [ ] Add prefix rule.
+- [ ] Add videoId prefix rules or exact-key rules.
 - [ ] Monitor until transition completes.
 - [ ] Snapshot cold bucket/prefix after transition.
 - [ ] Build mapping rows from before/after cold object diff.
 - [ ] Reconcile duplicate payload and ambiguous rows.
 - [ ] Verify sampled reads and checksums.
-- [ ] Restore samples through mapping into a fresh MinIO.
+- [ ] Restore at least one complete videoId group through mapping into a fresh MinIO.
 - [ ] Record disk freed and cold target growth.
 
 ### Phase 4: Production Wave
 
 - [ ] Choose one old MinIO server and one bucket.
-- [ ] Choose age or prefix window.
+- [ ] Choose a business age window for candidate videoId rows.
+- [ ] Generate the videoId object manifest before applying MinIO lifecycle rules.
 - [ ] Run during low business load.
 - [ ] Monitor every 5 to 15 minutes.
 - [ ] Keep the wave small enough to stop manually.
@@ -926,7 +1024,7 @@ If the problem is filesystem directory entry pressure, inode pressure, or slow l
 
 ### Phase 5: Expansion
 
-- [ ] Add more prefixes on the same source only after the first source passes.
+- [ ] Add more videoId groups on the same source only after the first source passes.
 - [ ] Add another source only after the first source has stable 24-hour reads.
 - [ ] Keep one source per wave until operational confidence is high.
 
@@ -941,9 +1039,10 @@ If the problem is filesystem directory entry pressure, inode pressure, or slow l
 - [ ] Cold target credentials are dedicated and stored safely.
 - [ ] Broad lifecycle rules are disabled before smoke.
 - [ ] Smoke object passed checksum after transition.
-- [ ] One user-prefix wave passed.
-- [ ] Mapping workflow ran during the user-prefix wave.
-- [ ] Mapping restore drill passed for the user-prefix wave.
+- [ ] One videoId-group wave passed.
+- [ ] Mapping workflow ran during the videoId-group wave.
+- [ ] Mapping restore drill passed for at least one complete videoId group.
+- [ ] Business manifest includes videoId, userId, file role, bucket, and key.
 - [ ] Duplicate-payload policy is agreed.
 - [ ] Stop conditions are agreed with operations and business owners.
 - [ ] Rollback stop procedure is rehearsed.

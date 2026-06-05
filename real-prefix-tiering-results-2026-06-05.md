@@ -265,7 +265,8 @@ Still required before production:
 
 ```text
 repeat on production-main MinIO 2022 with real data scale
-run 100+ object batches with concurrent uploads and reads
+run videoId-group batches with concurrent uploads and reads
+confirm the five expected MinIO object roles from the video table
 record first-byte latency and full-read latency before/after transition
 measure lifecycle worker throughput over hours
 define duplicate-payload mapping policy
@@ -276,13 +277,14 @@ test capacity alarms and cold target failure behavior
 
 ## 10. Recommendation
 
-Proceed to a production-like 2022 same-version prefix test:
+Proceed to a production-like 2022 same-version videoId-group test:
 
 ```text
 one old MinIO
 one cold MinIO
 one source bucket
-one bounded prefix
+one bounded set of candidate videoId rows
+all expected object roles resolved from the business tables
 same MinIO release on source and cold target
 mapping generated during transition
 restore drill before expanding

@@ -37,6 +37,7 @@ source 对象路径空间从 635331560 bytes 降到 144912 bytes：通过
 
 ```text
 MinIO lifecycle transition 用于释放旧 MinIO 磁盘空间。
+迁移选择应先按 video 表筛出候选 videoId，再迁移该 videoId 对应的完整对象组。
 恢复映射必须在迁移批次中生成，不能等源 MinIO metadata 丢失后再补。
 如果要求严格灾备，还需要复制、归档或经过大规模恢复演练的 mapping recovery。
 ```
