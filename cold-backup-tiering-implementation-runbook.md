@@ -991,35 +991,40 @@ Use the video table to select videoId rows, then resolve only the object keys ow
 This limits accidental migration of unrelated objects and gives recovery a business-level audit key.
 ```
 
-### 15.1 2026-06-05 VideoId Smoke Update
+### 15.1 2026-06-05 Corrected VideoId Smoke Update
 
-The `videoId=14708948` smoke clarified the difference between business migration mapping and source-space release.
+The corrected `videoId=14708948` smoke validated the complete five-file business migration unit.
 
 What passed:
 
 ```text
-The corrected `video_raw_url` derivation found exactly 3 A380 objects.
-Those 3 objects were copied to 4070S cold MinIO.
-The cold bucket grew by 152422815 bytes.
-The copied objects were restored to a restore MinIO under original bucket/key.
-Checksum verification passed 3/3.
+The corrected JSON row resolved all 5 expected roles:
+  source_upload
+  cover
+  watermark_source
+  transcoded_video
+  playback_video
+All 5 source objects transitioned to COLD_4070_VIDEOID5_14708948_20260605.
+A380 source physical footprint dropped from 312304728 bytes to 14124 bytes.
+The 4070S cold bucket grew by 156145437 bytes.
+The 5 cold internal objects were mapped by size + SHA256.
+All 5 objects restored to a restore MinIO under original bucket/key.
+Checksum verification passed 5/5.
 ```
 
-What did not complete:
+Operational timing:
 
 ```text
-A narrow MinIO lifecycle transition rule for the same 3-object prefix did not transition during the scanner observation window.
-The remote tier check passed and the lifecycle rule was valid.
-The A380 scanner trace did not reach the target cf98a722... directory during the sample.
-The source objects stayed STANDARD and A380 disk space was not freed in this videoId smoke.
+The lifecycle rules were valid immediately, but the actual transition happened after about 756 seconds.
+The A380 scanner is asynchronous and may not reach a large account directory immediately.
 ```
 
 Operational rule:
 
 ```text
-Keep copy/archive verification and lifecycle capacity relief as separate acceptance checks.
-Do not declare old-MinIO space freed until source objects show the expected tier storage class and the cold-prefix delta is reconciled.
+Do not declare old-MinIO space freed until source objects show the expected tier storage class and the A380 physical footprint shrinks.
 Do not delete source objects in a real-data smoke unless the application fallback and restore path have been rehearsed and approved.
+Keep lifecycle rules narrow and remove them after the batch.
 ```
 
 ## 16. Rollout Plan

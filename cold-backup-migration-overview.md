@@ -137,7 +137,7 @@ Do record cold internal keys in a dedicated recovery mapping table.
 | 2026-06-04 | Same-version MinIO 2022 and 2023 isolated tiering | PASS | `minio-tier-version-compat-results-2026-06-04.md` |
 | 2026-06-05 | `newminio1` both cold-tier receiver and normal upload node | PASS | `minio-hybrid-role-mapping-recovery-results-2026-06-05.md` |
 | 2026-06-05 | A380 real prefix, 15 objects, mapping and restore drill | PASS | `real-prefix-tiering-results-2026-06-05.md` |
-| 2026-06-05 | `videoId=14708948`, 3 derived `video_raw_url` objects, cold copy and restore drill | PASS for copy/restore; lifecycle source-space release not completed in scanner window | `videoid-cold-backup-smoke-results-2026-06-05.md` |
+| 2026-06-05 | `videoId=14708948`, corrected JSON, complete five-file lifecycle transition and restore drill | PASS | `videoid-cold-backup-smoke-results-2026-06-05.md` |
 
 Important result from the real-prefix test:
 
@@ -150,23 +150,24 @@ All 15 objects restored through mapping into a fresh MinIO.
 Two rows were ambiguous because two JPG objects had identical payload bytes.
 ```
 
-Important result from the videoId smoke:
+Important result from the corrected videoId smoke:
 
 ```text
-The corrected `video_raw_url` rule resolved 3 A380 objects for videoId 14708948.
-The 3 objects totalled 152416763 logical bytes.
-Copy to 4070S cold MinIO increased the cold bucket footprint by 152422815 bytes.
-Restore to a separate MinIO under original bucket/key passed 3/3 checksum checks.
-A narrow lifecycle transition rule for the same 3 objects did not transition during the scanner observation window.
-The source objects remained STANDARD, so source disk space was not freed by this sample.
+The corrected row resolved all 5 expected objects for videoId 14708948.
+The 5 objects totalled 156138190 logical bytes.
+All 5 objects transitioned to COLD_4070_VIDEOID5_14708948_20260605 after about 756 seconds.
+A380 source physical footprint dropped from 312304728 bytes to 14124 bytes.
+4070S cold bucket footprint increased by 156145437 bytes.
+Mapping matched 5/5 cold internal objects by size + SHA256.
+Restore to a separate MinIO under original bucket/key passed 5/5 checksum checks.
 ```
 
 Implication:
 
 ```text
-videoId-based manifest generation is viable.
-Source-space relief still must be proven by lifecycle completion, not by copy-only archive tests.
-For production, track both the recovery-copy result and the transition/storage-class result separately.
+videoId-based manifest generation is viable when the correct row and path transform are used.
+Source-space relief is confirmed for the complete five-file videoId group.
+Lifecycle scanner timing is asynchronous; production tooling must wait for storage-class and footprint evidence.
 ```
 
 ## 5. Mapping Decision

@@ -318,42 +318,45 @@ the restored videoId can be evaluated as a complete business unit
 optional missing roles are explicitly documented
 ```
 
-### 6.1 2026-06-05 VideoId Copy/Restore Smoke
+### 6.1 2026-06-05 Corrected VideoId Lifecycle/Restore Smoke
 
-The `videoId=14708948` smoke completed a copy-based recovery drill for the 3 objects derived from `video_raw_url`.
+The corrected `videoId=14708948` smoke completed a lifecycle-based recovery drill for all 5 expected business roles.
 
 Result:
 
 ```text
-source objects: 3
-source logical bytes: 152416763
-cold target footprint delta: 152422815
-restore checksum result: 3/3 OK
+source objects: 5
+source logical bytes: 156138190
+A380 source footprint before: 312304728
+A380 source footprint after: 14124
+cold target footprint delta: 156145437
+mapping match result: 5/5
+restore checksum result: 5/5 OK
 evidence: videoid-cold-backup-smoke-results-2026-06-05.md
 ```
 
-This validates an explicit archive-copy mapping model:
-
-```text
-source bucket/key
-  -> cold archive bucket/key that preserves the source key under a batch prefix
-  -> restore bucket/key
-```
-
-This is different from MinIO lifecycle transition mapping:
+This validates the MinIO lifecycle mapping model for one complete videoId group:
 
 ```text
 source bucket/key
   -> source MinIO metadata/stub
   -> cold MinIO internal generated key
+  -> restore bucket/key
+```
+
+It also confirms why mapping must be generated during migration:
+
+```text
+cold internal keys are generated names, not the original business source keys
+restore succeeds when mapping captures source_key, cold_key, size, and SHA256
 ```
 
 Recovery implication:
 
 ```text
-Explicit archive copy is easier for standalone cold reads and disaster recovery because the cold key can preserve the original source key.
-Lifecycle transition is better for source capacity relief while keeping old URLs working, but recovery still depends on source metadata or a generated mapping.
-If both are used, store two mapping columns or two mapping rows: one for lifecycle cold_object_key and one for archive cold_object_key.
+Lifecycle transition can free source capacity while old URLs keep working.
+Mapping + cold MinIO can restore the original bucket/key into a fresh MinIO for tested rows.
+Production recovery still needs batch-wide mapping coverage and periodic restore drills.
 ```
 
 ## 7. Failure Handling
