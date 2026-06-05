@@ -57,6 +57,7 @@ MinIO lifecycle transition 用于释放旧 MinIO 磁盘空间。
 | `cold-backup-tiering-implementation-runbook.md` | 旧 MinIO 数据转层到冷备 MinIO 的生产实施方案和版本要求 |
 | `cold-backup-data-recovery-runbook.md` | 冷备数据恢复 runbook，说明迁移中如何处理 source 到 cold 的映射关系 |
 | `real-prefix-tiering-results-2026-06-05.md` | 2026-06-05 A380 真实前缀 15 对象 transition、映射和恢复实测结果 |
+| `videoid-business-row-smoke-2026-06-05.md` | 2026-06-05 `videoId=14708948` 业务 row 到 A380 MinIO 对象映射 smoke 结果 |
 | `minio-tier-version-compat-results-2026-06-04.md` | 2026-06-04 MinIO 2022-11-08 与 2023-12-23 同版本冷备 tiering 兼容性实测 |
 | `cold-tier-mapping-recovery-test-plan.md` | 冷端映射表恢复可行性测试方案，用于验证源端 metadata 丢失后的自研恢复可能性 |
 | `minio-hybrid-role-mapping-recovery-results-2026-06-05.md` | 2026-06-05 `newminio1` 同时承接冷层和新上传，并用映射表恢复的实测结果 |
