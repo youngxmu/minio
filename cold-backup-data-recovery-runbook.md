@@ -318,6 +318,44 @@ the restored videoId can be evaluated as a complete business unit
 optional missing roles are explicitly documented
 ```
 
+### 6.1 2026-06-05 VideoId Copy/Restore Smoke
+
+The `videoId=14708948` smoke completed a copy-based recovery drill for the 3 objects derived from `video_raw_url`.
+
+Result:
+
+```text
+source objects: 3
+source logical bytes: 152416763
+cold target footprint delta: 152422815
+restore checksum result: 3/3 OK
+evidence: videoid-cold-backup-smoke-results-2026-06-05.md
+```
+
+This validates an explicit archive-copy mapping model:
+
+```text
+source bucket/key
+  -> cold archive bucket/key that preserves the source key under a batch prefix
+  -> restore bucket/key
+```
+
+This is different from MinIO lifecycle transition mapping:
+
+```text
+source bucket/key
+  -> source MinIO metadata/stub
+  -> cold MinIO internal generated key
+```
+
+Recovery implication:
+
+```text
+Explicit archive copy is easier for standalone cold reads and disaster recovery because the cold key can preserve the original source key.
+Lifecycle transition is better for source capacity relief while keeping old URLs working, but recovery still depends on source metadata or a generated mapping.
+If both are used, store two mapping columns or two mapping rows: one for lifecycle cold_object_key and one for archive cold_object_key.
+```
+
 ## 7. Failure Handling
 
 If mapping reconciliation fails:

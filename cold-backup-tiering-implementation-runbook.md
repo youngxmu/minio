@@ -991,6 +991,37 @@ Use the video table to select videoId rows, then resolve only the object keys ow
 This limits accidental migration of unrelated objects and gives recovery a business-level audit key.
 ```
 
+### 15.1 2026-06-05 VideoId Smoke Update
+
+The `videoId=14708948` smoke clarified the difference between business migration mapping and source-space release.
+
+What passed:
+
+```text
+The corrected `video_raw_url` derivation found exactly 3 A380 objects.
+Those 3 objects were copied to 4070S cold MinIO.
+The cold bucket grew by 152422815 bytes.
+The copied objects were restored to a restore MinIO under original bucket/key.
+Checksum verification passed 3/3.
+```
+
+What did not complete:
+
+```text
+A narrow MinIO lifecycle transition rule for the same 3-object prefix did not transition during the scanner observation window.
+The remote tier check passed and the lifecycle rule was valid.
+The A380 scanner trace did not reach the target cf98a722... directory during the sample.
+The source objects stayed STANDARD and A380 disk space was not freed in this videoId smoke.
+```
+
+Operational rule:
+
+```text
+Keep copy/archive verification and lifecycle capacity relief as separate acceptance checks.
+Do not declare old-MinIO space freed until source objects show the expected tier storage class and the cold-prefix delta is reconciled.
+Do not delete source objects in a real-data smoke unless the application fallback and restore path have been rehearsed and approved.
+```
+
 ## 16. Rollout Plan
 
 ### Phase 0: Tooling
@@ -1039,6 +1070,8 @@ This limits accidental migration of unrelated objects and gives recovery a busin
 - [ ] Verify sampled reads and checksums.
 - [ ] Restore at least one complete videoId group through mapping into a fresh MinIO.
 - [ ] Record disk freed and cold target growth.
+- [ ] If using explicit archive copy in addition to lifecycle, record copy success separately from source-space release.
+- [ ] Treat lifecycle scanner timing as asynchronous; wait for actual storage-class changes, not just rule creation.
 
 ### Phase 4: Production Wave
 

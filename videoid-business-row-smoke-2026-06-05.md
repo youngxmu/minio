@@ -8,10 +8,11 @@
 
 ## 1. Result
 
-Smoke result after business-rule clarification:
+Smoke result after business-rule clarification and the follow-up migration smoke:
 
 ```text
-PARTIAL PASS
+PARTIAL PASS for full business-row coverage.
+PASS for the corrected `video_raw_url` 3-object cold-copy and restore smoke.
 ```
 
 What passed:
@@ -22,6 +23,7 @@ The row can produce a first-pass business object manifest.
 A380 host MinIO was healthy during the check.
 Signed S3 HEAD verification against A380 MinIO worked for known existing objects.
 The corrected `video_raw_url` derivation rule produced 3 A380 MinIO objects that all returned HEAD 200.
+The 3 derived objects were copied to 4070S cold MinIO and restored to a restore MinIO with checksum verification.
 ```
 
 What did not pass:
@@ -29,6 +31,7 @@ What did not pass:
 ```text
 The JSON row file and the later confirmed business URL do not contain the same object path.
 This sample proves the `video_raw_url -> source/watermark/transcode` trio, but not yet the full cover/playback 5-role group from one fresh DB query.
+MinIO lifecycle transition for these 3 objects did not complete during the scanner observation window, so this sample did not prove source-space release.
 ```
 
 ## 2. Row Summary
@@ -186,6 +189,68 @@ http://172.16.100.132:9000/<bucket>/<key> -> 200
 
 This confirms the `video_raw_url` derivation rule for the 3 video payload roles.
 
+## 4.6 VideoId Cold Copy And Restore Smoke
+
+The actual videoId-driven migration smoke was completed for the 3 objects derived from `video_raw_url`.
+
+Cold copy target:
+
+```text
+http://172.16.100.217:18610/tier-a380-videoid-sucaiwang/a380-9000/sucaiwang/videoid-14708948-manual-copy-20260605/<source-key>
+```
+
+Restore target:
+
+```text
+http://172.16.100.217:18620/restore-sucaiwang/<source-key>
+```
+
+Result:
+
+```text
+SOURCE_LOGICAL_BYTES 152416763
+COLD_BUCKET_DU_DELTA_BYTES 152422815
+COPY_RESTORE_OK_COUNT 3/3
+VERIFY_RESULT PASS
+```
+
+Verified access URLs:
+
+| Role | Cold-copy URL | Restore URL |
+| --- | --- | --- |
+| `source_upload` | `http://172.16.100.217:18610/tier-a380-videoid-sucaiwang/a380-9000/sucaiwang/videoid-14708948-manual-copy-20260605/sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae.MOV` | `http://172.16.100.217:18620/restore-sucaiwang/sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae.MOV` |
+| `watermark_source` | `http://172.16.100.217:18610/tier-a380-videoid-sucaiwang/a380-9000/sucaiwang/videoid-14708948-manual-copy-20260605/sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae_mark919.MOV` | `http://172.16.100.217:18620/restore-sucaiwang/sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae_mark919.MOV` |
+| `transcoded_video` | `http://172.16.100.217:18610/tier-a380-videoid-sucaiwang/a380-9000/sucaiwang/videoid-14708948-manual-copy-20260605/sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae_h265.MOV` | `http://172.16.100.217:18620/restore-sucaiwang/sucaiwang/100192/15624/cf98a722-5227-4bd5-b2d4-b2637661a4ae_h265.MOV` |
+
+Detailed result:
+
+```text
+videoid-cold-backup-smoke-results-2026-06-05.md
+```
+
+## 4.7 Lifecycle Transition Status For This Sample
+
+A narrow lifecycle transition attempt was also run for the same 3-object stem.
+
+Observed result:
+
+```text
+remote tier connectivity: pass
+lifecycle rule: created and exported as enabled
+source objects: stayed STANDARD
+cold lifecycle bucket: no new lifecycle-created objects
+scanner trace: sampled 637 events, but did not reach the cf98a722... target directory
+temporary lifecycle rules: removed after test
+```
+
+Interpretation:
+
+```text
+This is not blocked by object resolution.
+The remaining gap is lifecycle scanner timing for source-space release.
+Production waves must monitor actual storage-class changes and cold-prefix deltas before declaring disk space freed.
+```
+
 ## 5. Interpretation
 
 This row supports the planned manifest concept, but not yet the storage-location assumption.
@@ -197,6 +262,8 @@ video table row -> direct object references: yes
 video_raw_url derivation -> source/watermark/transcode objects: confirmed on A380 for the corrected URL
 cover_url and playback video_url from the same fresh DB row: still need live DB confirmation
 videoId 14708948 as a full 5-role migration smoke sample: not complete yet
+videoId 14708948 as a 3-role `video_raw_url` migration smoke: copy and restore passed
+videoId 14708948 lifecycle source-space release: not completed during scanner observation
 ```
 
 Possible reasons:
