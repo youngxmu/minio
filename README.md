@@ -33,6 +33,15 @@ source 对象路径空间从 635331560 bytes 降到 144912 bytes：通过
 映射表恢复到 fresh MinIO：通过
 ```
 
+2026-06-08 已完成已迁移对象删除 smoke：
+
+```text
+新建 2 个 8MiB 测试对象 transition 到 4070S 冷备 MinIO：通过
+通过 A380 源 bucket/key 删除其中 1 个已迁移对象：通过
+被删除对象的 A380 源 URL 和 4070S cold internal URL 均返回 404：通过
+另 1 个保留对象仍可通过 A380 源 URL 和 cold URL 访问：通过
+```
+
 当前冷备方向：
 
 ```text
@@ -58,6 +67,7 @@ MinIO lifecycle transition 用于释放旧 MinIO 磁盘空间。
 | `cold-backup-data-recovery-runbook.md` | 冷备数据恢复 runbook，说明迁移中如何处理 source 到 cold 的映射关系 |
 | `real-prefix-tiering-results-2026-06-05.md` | 2026-06-05 A380 真实前缀 15 对象 transition、映射和恢复实测结果 |
 | `videoid-business-row-smoke-2026-06-05.md` | 2026-06-05 `videoId=14708948` 业务 row 到 A380 MinIO 对象映射 smoke 结果 |
+| `cold-backup-delete-smoke-results-2026-06-08.md` | 2026-06-08 已迁移对象源端删除是否同步清理 cold payload 的 smoke 结果 |
 | `minio-tier-version-compat-results-2026-06-04.md` | 2026-06-04 MinIO 2022-11-08 与 2023-12-23 同版本冷备 tiering 兼容性实测 |
 | `cold-tier-mapping-recovery-test-plan.md` | 冷端映射表恢复可行性测试方案，用于验证源端 metadata 丢失后的自研恢复可能性 |
 | `minio-hybrid-role-mapping-recovery-results-2026-06-05.md` | 2026-06-05 `newminio1` 同时承接冷层和新上传，并用映射表恢复的实测结果 |
@@ -73,6 +83,8 @@ MinIO lifecycle transition 用于释放旧 MinIO 磁盘空间。
 | `scripts/dual_minio_s3bench.py` | S3/MinIO PUT、GET、transcode、push 模拟工具 |
 | `scripts/video_location_index.py` | 本地 SQLite 位置索引维护工具 |
 | `scripts/reset_dual_minio_test.sh` | 多轮双 MinIO 测试 reset/clean 脚本 |
+| `scripts/cold_tier_delete_smoke_remote.sh` | 4070S 上执行的冷备 tier 删除 smoke 脚本，不包含密钥 |
+| `scripts/cold_tier_delete_smoke_resume_remote.sh` | 删除 smoke 续跑脚本，用于从已 transition 批次继续清理 rule 和验证删除 |
 | `miniochat.md` | 参考建议原文 |
 
 ## 安全约定

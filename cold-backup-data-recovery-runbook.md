@@ -359,6 +359,42 @@ Mapping + cold MinIO can restore the original bucket/key into a fresh MinIO for 
 Production recovery still needs batch-wide mapping coverage and periodic restore drills.
 ```
 
+### 6.2 2026-06-08 Transitioned Object Delete Smoke
+
+The delete smoke validates the normal deletion direction for already-transitioned objects in the tested non-versioned path.
+
+Result:
+
+```text
+two new 8 MiB test objects transitioned from A380 to 4070S cold tier
+delete.bin source URL before delete: 206
+delete.bin cold URL before delete: 206
+delete.bin deleted through A380 source bucket/key
+delete.bin source URL after delete: 404
+delete.bin cold URL after delete: 404
+verify.bin retained for manual access check
+evidence: cold-backup-delete-smoke-results-2026-06-08.md
+```
+
+Recovery-table implication:
+
+```text
+Mapping rows should include migration status and delete status.
+When business data expires, delete through source MinIO first.
+After source delete, verify the cold internal object is gone and mark the mapping row DELETED.
+Do not delete cold internal objects first, because that breaks source metadata and mapping recovery.
+```
+
+Suggested mapping states:
+
+| State | Meaning |
+| --- | --- |
+| `TRANSITIONED` | source object is a metadata/stub and cold payload exists |
+| `DELETE_REQUESTED` | business delete has been issued through source MinIO |
+| `DELETED` | source object and cold internal object are both gone |
+| `DELETE_ORPHANED` | source is gone but cold payload still exists, needs investigation |
+| `BROKEN_COLD_REFERENCE` | cold payload was removed directly while source metadata still exists |
+
 ## 7. Failure Handling
 
 If mapping reconciliation fails:

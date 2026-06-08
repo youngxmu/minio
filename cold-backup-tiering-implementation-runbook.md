@@ -1027,6 +1027,39 @@ Do not delete source objects in a real-data smoke unless the application fallbac
 Keep lifecycle rules narrow and remove them after the batch.
 ```
 
+### 15.2 2026-06-08 Transitioned Object Delete Smoke
+
+The delete smoke used two new random 8 MiB objects under an isolated A380 `sucaiwang` test prefix.
+
+What passed:
+
+```text
+Both objects transitioned to COLD_4070_DELETE_SMOKE_20260608_134624.
+The batch lifecycle rule d8j5ej9pqccc73bskgjg was removed after transition.
+Before delete, source and cold URLs for both objects returned 206.
+delete.bin was deleted through the A380 source bucket/key.
+Within 1 second, delete.bin source URL returned 404.
+Within 1 second, delete.bin cold internal URL returned 404.
+verify.bin stayed readable from both the A380 source URL and the 4070S cold URL.
+```
+
+Operational rule:
+
+```text
+For transitioned objects, business deletes should still go through the source old MinIO bucket/key.
+Do not delete cold internal objects directly.
+Do not attach independent lifecycle cleanup rules to cold-tier buckets.
+If cold capacity must be released, delete expired business objects through the source old MinIO and verify both source and cold 404.
+```
+
+Production caveat:
+
+```text
+This delete smoke did not cover versioning, object lock, legal hold, or lifecycle expiration behavior.
+Before production, repeat the delete smoke against the exact production MinIO version and bucket settings.
+If bucket versioning is enabled, define whether the business delete creates a delete marker or removes a specific version, then test cold cleanup for that exact action.
+```
+
 ## 16. Rollout Plan
 
 ### Phase 0: Tooling

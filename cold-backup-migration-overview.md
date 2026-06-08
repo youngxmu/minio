@@ -1,6 +1,6 @@
 # Cold Backup MinIO Migration Overview
 
-> Date: 2026-06-05
+> Date: 2026-06-08
 > Branch: `codex/cold-backup-tiering-test`
 > Scope: old independent MinIO capacity relief, cold MinIO migration validation, mapping-based recovery drill.
 
@@ -138,6 +138,7 @@ Do record cold internal keys in a dedicated recovery mapping table.
 | 2026-06-05 | `newminio1` both cold-tier receiver and normal upload node | PASS | `minio-hybrid-role-mapping-recovery-results-2026-06-05.md` |
 | 2026-06-05 | A380 real prefix, 15 objects, mapping and restore drill | PASS | `real-prefix-tiering-results-2026-06-05.md` |
 | 2026-06-05 | `videoId=14708948`, corrected JSON, complete five-file lifecycle transition and restore drill | PASS | `videoid-cold-backup-smoke-results-2026-06-05.md` |
+| 2026-06-08 | Already-transitioned random object deleted through A380 source MinIO | PASS | `cold-backup-delete-smoke-results-2026-06-08.md` |
 
 Important result from the real-prefix test:
 
@@ -168,6 +169,16 @@ Implication:
 videoId-based manifest generation is viable when the correct row and path transform are used.
 Source-space relief is confirmed for the complete five-file videoId group.
 Lifecycle scanner timing is asynchronous; production tooling must wait for storage-class and footprint evidence.
+```
+
+Important result from the delete smoke:
+
+```text
+Two new 8 MiB test objects transitioned from A380 to the 4070S cold tier.
+Deleting one transitioned object through the A380 source bucket/key made both the source URL and cold internal URL return 404.
+The retained transitioned object still reads through both A380 source URL and 4070S cold URL.
+This supports source-side business deletes for transitioned objects in the tested unversioned path.
+Direct deletion or independent lifecycle cleanup inside cold-tier buckets remains forbidden.
 ```
 
 ## 5. Mapping Decision
@@ -238,4 +249,5 @@ broad full-bucket lifecycle rules
 transition-only disaster recovery claims
 mapping after source metadata has already been lost
 mixed-version source/cold production waves
+versioned/object-lock delete semantics
 ```
