@@ -283,6 +283,12 @@ python3 -m unittest tests/test_cold_backup_migrator_planning.py tests/test_cold_
 
 ## Phase 6 - A380 Integration Test
 
+Status:
+
+```text
+metadata schema/API/plan-outbox smoke passed; real MinIO lifecycle execution pending
+```
+
 Prerequisites:
 
 ```text
@@ -292,6 +298,12 @@ sucai_meta schema applied
 metadata API started on A380
 migrator config stored outside this repo
 old MinIO and new MinIO versions aligned
+```
+
+Completed smoke evidence:
+
+```text
+cold-backup-automation-smoke-results-2026-06-08.md
 ```
 
 Execution order:

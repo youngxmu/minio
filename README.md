@@ -79,6 +79,7 @@ MinIO lifecycle transition 用于释放旧 MinIO 磁盘空间。
 | `real-prefix-tiering-results-2026-06-05.md` | 2026-06-05 A380 真实前缀 15 对象 transition、映射和恢复实测结果 |
 | `videoid-business-row-smoke-2026-06-05.md` | 2026-06-05 `videoId=14708948` 业务 row 到 A380 MinIO 对象映射 smoke 结果 |
 | `cold-backup-delete-smoke-results-2026-06-08.md` | 2026-06-08 已迁移对象源端删除是否同步清理 cold payload 的 smoke 结果 |
+| `cold-backup-automation-smoke-results-2026-06-08.md` | 2026-06-08 A380 上 `sucai_meta`、FastAPI、plan/outbox 的自动化 smoke 结果 |
 | `minio-tier-version-compat-results-2026-06-04.md` | 2026-06-04 MinIO 2022-11-08 与 2023-12-23 同版本冷备 tiering 兼容性实测 |
 | `cold-tier-mapping-recovery-test-plan.md` | 冷端映射表恢复可行性测试方案，用于验证源端 metadata 丢失后的自研恢复可能性 |
 | `minio-hybrid-role-mapping-recovery-results-2026-06-05.md` | 2026-06-05 `newminio1` 同时承接冷层和新上传，并用映射表恢复的实测结果 |
