@@ -52,6 +52,16 @@ For current production-main MinIO, use RELEASE.2022-11-08T05-27-07Z on both side
 
 Use stable source ids. Do not use raw IP addresses as the only identifier in batch records.
 
+For the automated metadata service, use:
+
+```text
+database: sucai_meta
+table prefix: meta_
+video identity: source_id + company_id + station_id + video_id
+```
+
+Do not create unique keys that depend on `video_id` alone. `video_id` can repeat across companies and stations.
+
 Example:
 
 | Role | Example |
