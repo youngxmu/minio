@@ -40,6 +40,7 @@ Validated in tests:
 | 2026-06-04 | Same-version MinIO `RELEASE.2022-11-08T05-27-07Z` source-to-cold transition passed in isolated test | `minio-tier-version-compat-results-2026-06-04.md` |
 | 2026-06-05 | `videoId=14708948` five-file business unit transitioned, mapped, and restored | `videoid-cold-backup-smoke-results-2026-06-05.md` |
 | 2026-06-08 | Source-side delete of an already-transitioned object also removed the cold internal object in the tested unversioned path | `cold-backup-delete-smoke-results-2026-06-08.md` |
+| 2026-06-08 | Automation CLI executed A380-to-4070S small-file lifecycle, mapping sync, and delete smoke | `cold-backup-automation-smallfile-results-2026-06-08.md` |
 
 Production implication:
 
@@ -232,6 +233,62 @@ Run this before any business-object migration. Use two new small objects:
 verify.bin: transition and keep readable for manual verification
 delete.bin: transition and then delete through source to verify cold cleanup
 ```
+
+Preferred execution is the automation CLI:
+
+```bash
+export TARGET_ID=newminio1
+export BATCH_ID="${SOURCE_ID}-${SOURCE_BUCKET}-smallfile-$(date +%Y%m%d-%H%M%S)"
+export SMOKE_PREFIX="migration-smoke/${BATCH_ID}"
+export COLD_ACCESS_KEY='<from-private-secret-store>'
+export COLD_SECRET_KEY='<from-private-secret-store>'
+
+python -m cold_backup_automation.cli small-file-smoke \
+  --state-db "./${BATCH_ID}/state.sqlite3" \
+  --batch-id "${BATCH_ID}" \
+  --source-id "${SOURCE_ID}" \
+  --source-alias "${SOURCE_ALIAS}" \
+  --source-endpoint "${SOURCE_ENDPOINT}" \
+  --source-bucket "${SOURCE_BUCKET}" \
+  --source-prefix "${SMOKE_PREFIX}" \
+  --target-id "${TARGET_ID}" \
+  --cold-alias "${COLD_ALIAS}" \
+  --cold-endpoint "${COLD_ENDPOINT}" \
+  --cold-bucket "${COLD_BUCKET}" \
+  --cold-prefix "${COLD_PREFIX}${BATCH_ID}/" \
+  --tier-name "${TIER_NAME}" \
+  --cold-access-key-env COLD_ACCESS_KEY \
+  --cold-secret-key-env COLD_SECRET_KEY \
+  --work-dir "./${BATCH_ID}" \
+  --file-size-bytes 8388608 \
+  --poll-interval-seconds 30 \
+  --timeout-seconds 1800 \
+  --mc-binary "${MC}"
+```
+
+The CLI handles:
+
+```text
+source object creation
+cold bucket creation
+tier add
+narrow lifecycle rule add
+storage class polling
+cold object SHA256 matching
+lifecycle rule cleanup
+source-side delete verification
+local SQLite mapping outbox creation
+```
+
+Use `sync-outbox` only after the metadata API is reachable:
+
+```bash
+python -m cold_backup_automation.cli sync-outbox \
+  --state-db "./${BATCH_ID}/state.sqlite3" \
+  --api-base-url "http://127.0.0.1:18080"
+```
+
+The manual commands below remain as a fallback and as an operator audit guide.
 
 ### 6.1 Create Isolated Smoke Objects
 

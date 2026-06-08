@@ -54,7 +54,7 @@ python3 -m unittest discover -s tests
 Status:
 
 ```text
-implemented locally; FastAPI/MySQL integration smoke pending
+implemented; A380 FastAPI/MySQL integration smoke passed
 ```
 
 Files to create:
@@ -218,7 +218,7 @@ python3 -m unittest tests/test_cold_backup_manifest.py
 Status:
 
 ```text
-planning and local outbox implemented; real mc execution pending A380 smoke
+planning, local outbox, and automated small-file mc execution implemented
 ```
 
 Files to create:
@@ -229,8 +229,10 @@ cold_backup_automation/mc.py
 tests/test_cold_backup_migrator_planning.py
 cold_backup_automation/cli.py
 cold_backup_automation/outbox_sync.py
+cold_backup_automation/small_file_smoke.py
 tests/test_cold_backup_cli.py
 tests/test_cold_backup_outbox_sync.py
+tests/test_cold_backup_small_file_smoke.py
 ```
 
 Responsibilities:
@@ -272,13 +274,22 @@ videoId manifest selection by source_id + company_id + station_id + video_id
 narrow lifecycle prefix planning
 batch/video/object API requests written to local SQLite outbox
 videoid-smoke --plan-only CLI
+small-file-smoke CLI with real mc execution
+small-file smoke transition polling, cold SHA256 matching, lifecycle cleanup, source-side delete check
+small-file smoke mapping outbox rows
 sync-outbox CLI posts local outbox requests to metadata API
 ```
 
 Local verification:
 
 ```bash
-python3 -m unittest tests/test_cold_backup_migrator_planning.py tests/test_cold_backup_cli.py tests/test_cold_backup_outbox_sync.py
+python3 -m unittest tests/test_cold_backup_migrator_planning.py tests/test_cold_backup_cli.py tests/test_cold_backup_outbox_sync.py tests/test_cold_backup_small_file_smoke.py
+```
+
+A380 verification:
+
+```text
+cold-backup-automation-smallfile-results-2026-06-08.md
 ```
 
 ## Phase 6 - A380 Integration Test
@@ -286,7 +297,7 @@ python3 -m unittest tests/test_cold_backup_migrator_planning.py tests/test_cold_
 Status:
 
 ```text
-metadata schema/API/plan-outbox smoke passed; real MinIO lifecycle execution pending
+metadata schema/API/plan-outbox smoke passed; automated small-file real MinIO lifecycle smoke passed
 ```
 
 Prerequisites:
@@ -304,6 +315,7 @@ Completed smoke evidence:
 
 ```text
 cold-backup-automation-smoke-results-2026-06-08.md
+cold-backup-automation-smallfile-results-2026-06-08.md
 ```
 
 Execution order:
@@ -337,4 +349,4 @@ operator runbook
 
 ## Current Next Step
 
-Run a FastAPI/MySQL smoke on A380, then wire real `mc` execution and outbox sync for a small-file smoke.
+Implement real `videoId` execution after the current `videoid-smoke --plan-only` path: sync batch/video/object metadata first, execute lifecycle transition for the resolved object group, match cold objects, then sync mapping rows.

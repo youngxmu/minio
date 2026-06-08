@@ -139,6 +139,7 @@ Do record cold internal keys in a dedicated recovery mapping table.
 | 2026-06-05 | A380 real prefix, 15 objects, mapping and restore drill | PASS | `real-prefix-tiering-results-2026-06-05.md` |
 | 2026-06-05 | `videoId=14708948`, corrected JSON, complete five-file lifecycle transition and restore drill | PASS | `videoid-cold-backup-smoke-results-2026-06-05.md` |
 | 2026-06-08 | Already-transitioned random object deleted through A380 source MinIO | PASS | `cold-backup-delete-smoke-results-2026-06-08.md` |
+| 2026-06-08 | Automated `small-file-smoke` from A380 old MinIO to 4070S cold MinIO, including mapping sync | PASS | `cold-backup-automation-smallfile-results-2026-06-08.md` |
 
 Important result from the real-prefix test:
 
@@ -179,6 +180,16 @@ Deleting one transitioned object through the A380 source bucket/key made both th
 The retained transitioned object still reads through both A380 source URL and 4070S cold URL.
 This supports source-side business deletes for transitioned objects in the tested unversioned path.
 Direct deletion or independent lifecycle cleanup inside cold-tier buckets remains forbidden.
+```
+
+Important result from the automated small-file smoke:
+
+```text
+The automation CLI created two 1 MiB objects, transitioned them to COLD_SMOKE_182702, and matched both cold internal objects by SHA256.
+The retained object returned HTTP 206 from both the A380 source URL and 4070S cold URL.
+The deleted object returned HTTP 404 from both the A380 source URL and 4070S cold URL after source-side delete.
+The local SQLite outbox produced two mapping rows and sync-outbox sent both to the A380 sucai_meta API.
+A380 /usr/local/bin/mc segfaulted, so the test used a user-local mc RELEASE.2023-12-23T08-47-21Z wrapper with an explicit config dir.
 ```
 
 ## 5. Mapping Decision

@@ -64,6 +64,21 @@ class McCommandBuilder:
             rule_id,
         ]
 
+    def export_lifecycle_rules(self, source_alias: str, bucket: str) -> List[str]:
+        return [self.mc_binary, "ilm", "rule", "export", self._bucket_ref(source_alias, bucket)]
+
+    def make_bucket(self, alias: str, bucket: str) -> List[str]:
+        return [self.mc_binary, "mb", "-p", self._bucket_ref(alias, bucket)]
+
+    def anonymous_download(self, alias: str, bucket: str) -> List[str]:
+        return [self.mc_binary, "anonymous", "set", "download", self._bucket_ref(alias, bucket)]
+
+    def cp(self, local_path: str, alias: str, bucket: str, key: str) -> List[str]:
+        return [self.mc_binary, "cp", "--quiet", local_path, self._object_ref(alias, bucket, key)]
+
+    def rm(self, alias: str, bucket: str, key: str) -> List[str]:
+        return [self.mc_binary, "rm", self._object_ref(alias, bucket, key)]
+
     def stat_json(self, source_alias: str, bucket: str, key: str) -> List[str]:
         return [self.mc_binary, "stat", "--json", self._object_ref(source_alias, bucket, key)]
 

@@ -42,6 +42,16 @@ source 对象路径空间从 635331560 bytes 降到 144912 bytes：通过
 另 1 个保留对象仍可通过 A380 源 URL 和 cold URL 访问：通过
 ```
 
+2026-06-08 已完成自动化 small-file 真实迁移 smoke：
+
+```text
+通过 cold_backup_automation.cli small-file-smoke 自动创建 2 个 1MiB 对象：通过
+A380 old MinIO transition 到 4070S cold MinIO：通过
+保留对象 A380 源 URL 和 4070S cold URL 都返回 206：通过
+删除对象从 A380 源端删除后，源 URL 和 cold URL 都返回 404：通过
+本地 SQLite 记录 2 条 mapping outbox，并同步到 A380 sucai_meta API：通过
+```
+
 当前冷备方向：
 
 ```text
@@ -80,6 +90,7 @@ MinIO lifecycle transition 用于释放旧 MinIO 磁盘空间。
 | `videoid-business-row-smoke-2026-06-05.md` | 2026-06-05 `videoId=14708948` 业务 row 到 A380 MinIO 对象映射 smoke 结果 |
 | `cold-backup-delete-smoke-results-2026-06-08.md` | 2026-06-08 已迁移对象源端删除是否同步清理 cold payload 的 smoke 结果 |
 | `cold-backup-automation-smoke-results-2026-06-08.md` | 2026-06-08 A380 上 `sucai_meta`、FastAPI、plan/outbox 的自动化 smoke 结果 |
+| `cold-backup-automation-smallfile-results-2026-06-08.md` | 2026-06-08 A380 到 4070S 的自动化 small-file lifecycle、mapping、删除 smoke 结果 |
 | `minio-tier-version-compat-results-2026-06-04.md` | 2026-06-04 MinIO 2022-11-08 与 2023-12-23 同版本冷备 tiering 兼容性实测 |
 | `cold-tier-mapping-recovery-test-plan.md` | 冷端映射表恢复可行性测试方案，用于验证源端 metadata 丢失后的自研恢复可能性 |
 | `minio-hybrid-role-mapping-recovery-results-2026-06-05.md` | 2026-06-05 `newminio1` 同时承接冷层和新上传，并用映射表恢复的实测结果 |
