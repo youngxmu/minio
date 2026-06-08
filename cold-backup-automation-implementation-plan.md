@@ -128,6 +128,12 @@ Keep the real DSN outside this repo.
 
 ## Phase 3 - Local SQLite State And Outbox
 
+Status:
+
+```text
+implemented locally
+```
+
 Files to create:
 
 ```text
@@ -161,7 +167,19 @@ outbox retry is idempotent
 local state survives process restart
 ```
 
+Local verification:
+
+```bash
+python3 -m unittest tests/test_cold_backup_local_state.py
+```
+
 ## Phase 4 - Manifest Parser
+
+Status:
+
+```text
+implemented locally
+```
 
 Files to create:
 
@@ -187,6 +205,12 @@ manifest rejects missing companyId/stationId/videoId
 manifest allows same videoId under different companyId/stationId
 manifest requires known file roles for first version
 manifest computes source_key_sha256 for every object
+```
+
+Local verification:
+
+```bash
+python3 -m unittest tests/test_cold_backup_manifest.py
 ```
 
 ## Phase 5 - MinIO Migration Orchestrator
@@ -274,4 +298,4 @@ operator runbook
 
 ## Current Next Step
 
-Run a FastAPI/MySQL smoke on A380, then implement Phase 3 local SQLite state and outbox.
+Run a FastAPI/MySQL smoke on A380, then implement Phase 5 MinIO migration orchestrator planning commands.
