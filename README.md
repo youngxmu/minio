@@ -65,6 +65,7 @@ MinIO lifecycle transition 用于释放旧 MinIO 磁盘空间。
 | `cold-backup-automation-design.md` | 冷备迁移自动化系统设计，使用 `sucai_meta` 和 `meta_` 表前缀 |
 | `cold-backup-automation-implementation-plan.md` | 冷备迁移自动化系统开发计划 |
 | `db/sucai_meta_schema.sql` | `sucai_meta` MySQL 元数据 schema |
+| `requirements-cold-backup.txt` | 冷备元数据 API 运行依赖 |
 | `cold-backup-tiering-test-plan.md` | 旧 MinIO 数据 transition 到冷备 MinIO 的单对象验证方案 |
 | `cold-backup-tiering-results-2026-06-04.md` | 2026-06-04 A380 单对象 transition 到 4070S 冷备 MinIO 的实测结果 |
 | `cold-backup-tiering-implementation-runbook.md` | 旧 MinIO 数据转层到冷备 MinIO 的生产实施方案和版本要求 |

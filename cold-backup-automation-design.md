@@ -195,6 +195,14 @@ GET  /api/v1/batches/{batchId}/summary
 
 The first API implementation can be Python FastAPI for the local test.
 
+Runtime configuration:
+
+```text
+SUCAI_META_DSN=mysql://<user>:<password>@127.0.0.1:3306/sucai_meta?charset=utf8mb4
+```
+
+Store the real DSN outside this repo.
+
 ## 7. Status Model
 
 Batch status:

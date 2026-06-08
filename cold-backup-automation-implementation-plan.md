@@ -21,7 +21,7 @@ video_id alone is never unique
 Status:
 
 ```text
-started
+completed locally
 ```
 
 Files:
@@ -51,6 +51,12 @@ python3 -m unittest discover -s tests
 
 ## Phase 2 - Metadata API
 
+Status:
+
+```text
+implemented locally; FastAPI/MySQL integration smoke pending
+```
+
 Files to create:
 
 ```text
@@ -60,6 +66,8 @@ cold_backup_automation/repository.py
 cold_backup_automation/api_models.py
 requirements-cold-backup.txt
 tests/test_cold_backup_api_models.py
+tests/test_cold_backup_db.py
+tests/test_cold_backup_repository.py
 ```
 
 Recommended local stack:
@@ -101,6 +109,22 @@ upsert APIs are idempotent by client_request_id or natural unique keys
 duplicate video_id across company/station is accepted
 duplicate source_id + company_id + station_id + video_id is rejected or updated idempotently
 ```
+
+Local verification:
+
+```bash
+python3 -m unittest tests/test_cold_backup_api_models.py tests/test_cold_backup_db.py tests/test_cold_backup_repository.py
+```
+
+Runtime setup on oldminio:
+
+```bash
+python3 -m pip install -r requirements-cold-backup.txt
+export SUCAI_META_DSN='mysql://<user>:<password>@127.0.0.1:3306/sucai_meta?charset=utf8mb4'
+python3 -m uvicorn cold_backup_automation.api:app --host 0.0.0.0 --port 18080
+```
+
+Keep the real DSN outside this repo.
 
 ## Phase 3 - Local SQLite State And Outbox
 
@@ -250,4 +274,4 @@ operator runbook
 
 ## Current Next Step
 
-Implement Phase 2 metadata API against `sucai_meta`, using the DDL and identity rules already added in Phase 1.
+Run a FastAPI/MySQL smoke on A380, then implement Phase 3 local SQLite state and outbox.
