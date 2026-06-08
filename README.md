@@ -67,6 +67,10 @@ MinIO lifecycle transition 用于释放旧 MinIO 磁盘空间。
 | `db/sucai_meta_schema.sql` | `sucai_meta` MySQL 元数据 schema |
 | `cold_backup_automation/local_state.py` | 迁移执行器本地 SQLite state/outbox |
 | `cold_backup_automation/manifest.py` | 迁移批次 JSONL manifest parser |
+| `cold_backup_automation/migrator.py` | videoId 迁移计划和本地 outbox 写入 |
+| `cold_backup_automation/mc.py` | MinIO `mc` 命令生成工具 |
+| `cold_backup_automation/outbox_sync.py` | 本地 outbox 到元数据 API 的同步工具 |
+| `cold_backup_automation/cli.py` | 冷备迁移自动化命令行入口 |
 | `requirements-cold-backup.txt` | 冷备元数据 API 运行依赖 |
 | `cold-backup-tiering-test-plan.md` | 旧 MinIO 数据 transition 到冷备 MinIO 的单对象验证方案 |
 | `cold-backup-tiering-results-2026-06-04.md` | 2026-06-04 A380 单对象 transition 到 4070S 冷备 MinIO 的实测结果 |

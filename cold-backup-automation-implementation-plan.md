@@ -215,12 +215,22 @@ python3 -m unittest tests/test_cold_backup_manifest.py
 
 ## Phase 5 - MinIO Migration Orchestrator
 
+Status:
+
+```text
+planning and local outbox implemented; real mc execution pending A380 smoke
+```
+
 Files to create:
 
 ```text
 cold_backup_automation/migrator.py
 cold_backup_automation/mc.py
 tests/test_cold_backup_migrator_planning.py
+cold_backup_automation/cli.py
+cold_backup_automation/outbox_sync.py
+tests/test_cold_backup_cli.py
+tests/test_cold_backup_outbox_sync.py
 ```
 
 Responsibilities:
@@ -252,6 +262,23 @@ small-file smoke can transition verify.bin and delete.bin
 delete smoke confirms source delete removes cold internal object
 single videoId smoke migrates all required objects
 mapping rows are synced to sucai_meta through API
+```
+
+Implemented local subset:
+
+```text
+mc command builder for tier/rule/stat/list/cat commands
+videoId manifest selection by source_id + company_id + station_id + video_id
+narrow lifecycle prefix planning
+batch/video/object API requests written to local SQLite outbox
+videoid-smoke --plan-only CLI
+sync-outbox CLI posts local outbox requests to metadata API
+```
+
+Local verification:
+
+```bash
+python3 -m unittest tests/test_cold_backup_migrator_planning.py tests/test_cold_backup_cli.py tests/test_cold_backup_outbox_sync.py
 ```
 
 ## Phase 6 - A380 Integration Test
@@ -298,4 +325,4 @@ operator runbook
 
 ## Current Next Step
 
-Run a FastAPI/MySQL smoke on A380, then implement Phase 5 MinIO migration orchestrator planning commands.
+Run a FastAPI/MySQL smoke on A380, then wire real `mc` execution and outbox sync for a small-file smoke.
