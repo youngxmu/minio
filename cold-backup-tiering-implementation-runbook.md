@@ -4,6 +4,14 @@
 > Branch: `codex/cold-backup-tiering-test`
 > Goal: move historical object payloads from multiple full old MinIO servers to a shared cold-backup MinIO, while keeping business access through the original old MinIO host/bucket/key.
 
+For production execution, start with:
+
+```text
+production-cold-backup-migration-runbook.md
+```
+
+This file remains the detailed design, evidence, version, and implementation reference.
+
 ## 1. Executive Decision
 
 Use MinIO lifecycle transition to a remote MinIO tier. Do not manually move object files out of MinIO data directories.

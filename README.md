@@ -61,6 +61,7 @@ MinIO lifecycle transition 用于释放旧 MinIO 磁盘空间。
 | `server-resource-inventory.md` | 服务器硬件、存储状态与任务分配建议 |
 | `hot-cold-tiering-analysis.md` | MinIO 热冷分层改造方案分析 |
 | `cold-backup-migration-overview.md` | 冷备 MinIO 迁移方向总览，包含当前结论、拓扑和证据索引 |
+| `production-cold-backup-migration-runbook.md` | 冷备 MinIO 生产迁移操作手册，按小文件 smoke、videoId smoke、生产波次组织 |
 | `cold-backup-tiering-test-plan.md` | 旧 MinIO 数据 transition 到冷备 MinIO 的单对象验证方案 |
 | `cold-backup-tiering-results-2026-06-04.md` | 2026-06-04 A380 单对象 transition 到 4070S 冷备 MinIO 的实测结果 |
 | `cold-backup-tiering-implementation-runbook.md` | 旧 MinIO 数据转层到冷备 MinIO 的生产实施方案和版本要求 |
