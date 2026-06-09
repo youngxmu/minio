@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from cold_backup_automation.cli import build_parser, run_small_file_smoke, run_videoid_smoke_plan
+from cold_backup_automation.cli import build_parser, run_small_file_smoke, run_sync_outbox, run_videoid_smoke_plan
 from cold_backup_automation.local_state import LocalStateStore
 
 
@@ -224,6 +224,38 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(captured["config"].cold_access_key, "ak-from-env")
         self.assertEqual(captured["config"].cold_secret_key, "sk-from-env")
+
+    def test_sync_outbox_can_read_api_key_from_environment(self):
+        captured = {}
+
+        def fake_sync(store, api_base_url, limit=100, api_key=None):
+            captured["api_base_url"] = api_base_url
+            captured["limit"] = limit
+            captured["api_key"] = api_key
+            return {"sent": 0, "failed": 0}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = build_parser().parse_args(
+                [
+                    "sync-outbox",
+                    "--state-db",
+                    os.path.join(tmpdir, "state.sqlite3"),
+                    "--api-base-url",
+                    "http://127.0.0.1:18080",
+                    "--api-key-env",
+                    "SUCAI_META_WRITE_KEY",
+                    "--limit",
+                    "7",
+                ]
+            )
+
+            with patch.dict(os.environ, {"SUCAI_META_WRITE_KEY": "write-token"}):
+                summary = run_sync_outbox(args, sync_func=fake_sync)
+
+        self.assertEqual(summary, {"sent": 0, "failed": 0})
+        self.assertEqual(captured["api_base_url"], "http://127.0.0.1:18080")
+        self.assertEqual(captured["limit"], 7)
+        self.assertEqual(captured["api_key"], "write-token")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
 .DS_Store
+.venv/
+__pycache__/
+*.pyc
 reports/
 *.log
 *.manifest
 *.key_conflicts.txt
 *.sha256.tsv
-

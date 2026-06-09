@@ -122,3 +122,10 @@ GitHub 凭据
 ```
 
 脚本中的敏感信息通过环境变量注入。
+
+`sucai_meta` FastAPI 在生产环境应配置 API key：
+
+```text
+SUCAI_META_WRITE_KEYS: 迁移写入 key，迁移窗口结束后轮换或作废
+SUCAI_META_READ_KEYS: 可选，只读查询/恢复演练 key
+```

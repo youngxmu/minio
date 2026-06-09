@@ -10,12 +10,14 @@ def sync_outbox(
     api_base_url: str,
     limit: int = 100,
     post_json: Optional[Callable[[str, Dict], Dict]] = None,
+    api_key: Optional[str] = None,
 ) -> Dict[str, int]:
     post = post_json or http_post_json
     summary = {"sent": 0, "failed": 0}
     for item in store.next_outbox(limit=limit):
         try:
-            response = post(_join_url(api_base_url, item["endpoint"]), item["payload_json"])
+            url = _join_url(api_base_url, item["endpoint"])
+            response = post(url, item["payload_json"], api_key=api_key) if api_key else post(url, item["payload_json"])
             status = str(response.get("status", "200"))
             if not status.startswith("2"):
                 raise RuntimeError("metadata API returned status " + status)
@@ -27,13 +29,16 @@ def sync_outbox(
     return summary
 
 
-def http_post_json(url: str, payload: Dict) -> Dict:
+def http_post_json(url: str, payload: Dict, api_key: Optional[str] = None) -> Dict:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    if api_key:
+        headers["Authorization"] = "Bearer " + api_key
     req = request.Request(
         url,
         data=body,
         method="POST",
-        headers={"Content-Type": "application/json; charset=utf-8"},
+        headers=headers,
     )
     with request.urlopen(req, timeout=30) as response:
         raw = response.read()

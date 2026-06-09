@@ -199,9 +199,23 @@ Runtime configuration:
 
 ```text
 SUCAI_META_DSN=mysql://<user>:<password>@127.0.0.1:3306/sucai_meta?charset=utf8mb4
+SUCAI_META_WRITE_KEYS=<comma-separated migration write keys>
+SUCAI_META_READ_KEYS=<comma-separated recovery lookup keys>
 ```
 
 Store the real DSN outside this repo.
+
+Authentication:
+
+```text
+If no API keys are configured, auth is disabled for local tests.
+If keys are configured, every write endpoint requires a write key.
+Read endpoints accept either a read key or a write key.
+/healthz does not require a key.
+Clients may send Authorization: Bearer <key> or X-API-Key: <key>.
+```
+
+For production, issue a short-lived write key for each migration window and revoke or rotate it after the wave. Keep any longer-lived key read-only unless a restore operation explicitly needs writes.
 
 ## 7. Status Model
 

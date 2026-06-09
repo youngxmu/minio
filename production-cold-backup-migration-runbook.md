@@ -216,6 +216,9 @@ export TIER_NAME=COLD_OLDMINIO1_SUCAIWANG
 
 export COLD_ACCESS_KEY='<from-private-secret-store>'
 export COLD_SECRET_KEY='<from-private-secret-store>'
+
+export SUCAI_META_API_BASE_URL=http://127.0.0.1:18080
+export SUCAI_META_WRITE_KEY='<from-private-secret-store>'
 ```
 
 Alias setup:
@@ -223,6 +226,25 @@ Alias setup:
 ```bash
 $MC alias set "${SOURCE_ALIAS}" "${SOURCE_ENDPOINT}" "${SOURCE_ACCESS_KEY}" "${SOURCE_SECRET_KEY}"
 $MC alias set "${COLD_ALIAS}" "${COLD_ENDPOINT}" "${COLD_ACCESS_KEY}" "${COLD_SECRET_KEY}"
+```
+
+Metadata API setup:
+
+```bash
+export SUCAI_META_DSN='mysql://<user>:<password>@127.0.0.1:3306/sucai_meta?charset=utf8mb4'
+export SUCAI_META_WRITE_KEYS="${SUCAI_META_WRITE_KEY}"
+export SUCAI_META_READ_KEYS='<optional-readonly-lookup-key>'
+
+python -m uvicorn cold_backup_automation.api:app --host 0.0.0.0 --port 18080
+```
+
+API key rules:
+
+```text
+write key: used by migration/sync-outbox during the migration window
+read key: optional, for lookup/summary/recovery checks
+healthz: unauthenticated
+after migration: revoke or rotate the write key
 ```
 
 ## 6. Phase A - One Small File Smoke
@@ -285,7 +307,8 @@ Use `sync-outbox` only after the metadata API is reachable:
 ```bash
 python -m cold_backup_automation.cli sync-outbox \
   --state-db "./${BATCH_ID}/state.sqlite3" \
-  --api-base-url "http://127.0.0.1:18080"
+  --api-base-url "${SUCAI_META_API_BASE_URL}" \
+  --api-key-env SUCAI_META_WRITE_KEY
 ```
 
 The manual commands below remain as a fallback and as an operator audit guide.

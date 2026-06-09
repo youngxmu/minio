@@ -47,6 +47,25 @@ class OutboxSyncTest(unittest.TestCase):
         self.assertEqual(pending[0]["attempt_count"], 1)
         self.assertEqual(pending[0]["status"], "FAILED")
 
+    def test_sync_outbox_passes_api_key_to_post_client(self):
+        calls = []
+
+        def fake_post(url, payload, api_key=None):
+            calls.append((url, payload, api_key))
+            return {"status": "200", "json": {"ok": True}}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = LocalStateStore(os.path.join(tmpdir, "state.sqlite3"))
+            store.initialize()
+            try:
+                store.enqueue_outbox("event", "/api/v1/events", {"eventType": "started"}, "batch-1")
+                summary = sync_outbox(store, "http://127.0.0.1:18080", post_json=fake_post, api_key="write-token")
+            finally:
+                store.close()
+
+        self.assertEqual(summary, {"sent": 1, "failed": 0})
+        self.assertEqual(calls, [("http://127.0.0.1:18080/api/v1/events", {"eventType": "started"}, "write-token")])
+
 
 if __name__ == "__main__":
     unittest.main()

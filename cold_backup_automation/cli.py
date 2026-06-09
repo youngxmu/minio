@@ -62,6 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
     sync = subparsers.add_parser("sync-outbox")
     sync.add_argument("--state-db", required=True)
     sync.add_argument("--api-base-url", required=True)
+    sync.add_argument("--api-key")
+    sync.add_argument("--api-key-env")
     sync.add_argument("--limit", type=int, default=100)
 
     summary = subparsers.add_parser("batch-summary")
@@ -111,11 +113,12 @@ def run_videoid_smoke_plan(args) -> dict:
     }
 
 
-def run_sync_outbox(args) -> dict:
+def run_sync_outbox(args, sync_func=sync_outbox) -> dict:
+    api_key = _optional_arg_or_env(args, "api_key", "api_key_env")
     store = LocalStateStore(args.state_db)
     store.initialize()
     try:
-        return sync_outbox(store, args.api_base_url, limit=args.limit)
+        return sync_func(store, args.api_base_url, limit=args.limit, api_key=api_key)
     finally:
         store.close()
 
@@ -218,6 +221,19 @@ def _arg_or_env(args, value_name: str, env_name: str) -> str:
             value_name.replace("_", "-"),
         )
     )
+
+
+def _optional_arg_or_env(args, value_name: str, env_name: str):
+    value = getattr(args, value_name, None)
+    if value:
+        return value
+    env_var = getattr(args, env_name, None)
+    if not env_var:
+        return None
+    value = os.environ.get(env_var)
+    if value:
+        return value
+    raise SystemExit("environment variable is empty: " + env_var)
 
 
 if __name__ == "__main__":

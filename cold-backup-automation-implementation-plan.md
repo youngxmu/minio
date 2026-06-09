@@ -66,6 +66,7 @@ cold_backup_automation/repository.py
 cold_backup_automation/api_models.py
 requirements-cold-backup.txt
 tests/test_cold_backup_api_models.py
+tests/test_cold_backup_api_auth.py
 tests/test_cold_backup_db.py
 tests/test_cold_backup_repository.py
 ```
@@ -108,6 +109,8 @@ API can create source, target, batch, video, object, and mapping records
 upsert APIs are idempotent by client_request_id or natural unique keys
 duplicate video_id across company/station is accepted
 duplicate source_id + company_id + station_id + video_id is rejected or updated idempotently
+write endpoints require write API key when keys are configured
+read endpoints accept read or write API key when keys are configured
 ```
 
 Local verification:
@@ -121,10 +124,12 @@ Runtime setup on oldminio:
 ```bash
 python3 -m pip install -r requirements-cold-backup.txt
 export SUCAI_META_DSN='mysql://<user>:<password>@127.0.0.1:3306/sucai_meta?charset=utf8mb4'
+export SUCAI_META_WRITE_KEYS='<migration-write-key>'
+export SUCAI_META_READ_KEYS='<optional-lookup-read-key>'
 python3 -m uvicorn cold_backup_automation.api:app --host 0.0.0.0 --port 18080
 ```
 
-Keep the real DSN outside this repo.
+Keep the real DSN and API keys outside this repo.
 
 ## Phase 3 - Local SQLite State And Outbox
 
@@ -278,6 +283,7 @@ small-file-smoke CLI with real mc execution
 small-file smoke transition polling, cold SHA256 matching, lifecycle cleanup, source-side delete check
 small-file smoke mapping outbox rows
 sync-outbox CLI posts local outbox requests to metadata API
+sync-outbox supports Authorization: Bearer through --api-key-env
 ```
 
 Local verification:
@@ -336,7 +342,6 @@ Do not move to a production-like batch until this passes.
 Required before online deployment:
 
 ```text
-authentication for metadata API
 rate limit and migration window enforcement
 structured logs
 metrics
@@ -345,6 +350,13 @@ restore drill command
 delete/versioning smoke for production bucket settings
 systemd service files
 operator runbook
+```
+
+Implemented production guardrail:
+
+```text
+metadata API key authentication for write/read scopes
+sync-outbox API key injection from environment variables
 ```
 
 ## Current Next Step
